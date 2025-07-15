@@ -58,7 +58,8 @@ impl NaturalLanguageParser {
     }
 
     fn parse_immediate_commands(&self, input: &str) -> Option<AvailableTool> {
-        let lower = input.to_lowercase().trim();
+        let lower_owned = input.to_lowercase();
+        let lower = lower_owned.trim();
 
         // Model parameter commands
         if lower.starts_with("set temperature") {

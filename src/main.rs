@@ -1,15 +1,11 @@
 use colored::Colorize;
 
-use crate::{
-    client::{fetch_models, select_model},
-    session::AssistantSession,
-};
+mod client;
+mod session;
+mod tools;
 
-pub mod api_models;
-pub mod cli;
-pub mod client;
-pub mod session;
-pub mod tools;
+use client::{fetch_models, select_model};
+use session::AssistantSession;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

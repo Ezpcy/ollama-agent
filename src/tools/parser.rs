@@ -1,192 +1,292 @@
 use super::core::{AvailableTool, EditOperation};
-use regex::Regex;
+use colored::Colorize;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ToolAnalysis {
+    reasoning: String,
+    tools: Vec<ToolRequest>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ToolRequest {
+    tool_type: String,
+    parameters: serde_json::Value,
+    reasoning: String,
+}
 
 pub struct NaturalLanguageParser {
-    web_patterns: Vec<Regex>,
-    file_patterns: Vec<Regex>,
-    project_patterns: Vec<Regex>,
-    command_patterns: Vec<Regex>,
+    // Remove regex patterns - we'll use LLM instead
 }
 
 impl NaturalLanguageParser {
     pub fn new() -> Self {
-        Self {
-            web_patterns: vec![
-                Regex::new(r"(?i)search\s+(?:for\s+|about\s+)?(.+?)(?:\s+on\s+(?:web|internet|google))?$").unwrap(),
-                Regex::new(r"(?i)(?:find|get|tell me about|what is|who is)\s+(.+?)(?:\s+(?:from|on)\s+(?:web|internet|wiki))?").unwrap(),
-                Regex::new(r"(?i)(?:information|info)\s+about\s+(.+?)(?:\s+from\s+(?:web|internet))?").unwrap(),
-                Regex::new(r"(?i)scrape\s+(?:the\s+)?(?:website\s+|url\s+|page\s+)?(.+)").unwrap(),
-            ],
-            file_patterns: vec![
-                Regex::new(r"(?i)(?:find|search|look for)\s+(?:files?\s+)?(?:named\s+|called\s+)?(.+?)(?:\s+in\s+(.+?))?$").unwrap(),
-                Regex::new(r"(?i)(?:read|show|open|cat)\s+(?:the\s+)?(?:file\s+)?(.+)").unwrap(),
-                Regex::new(r"(?i)(?:write|create|make)\s+(?:a\s+)?(?:file\s+)?(.+?)(?:\s+with\s+content\s+(.+))?").unwrap(),
-                Regex::new(r"(?i)(?:edit|modify|change)\s+(?:the\s+)?(?:file\s+)?(.+)").unwrap(),
-                Regex::new(r#"(?i)(?:search|find|grep)\s+(?:for\s+)?["'](.+?)["'](?:\s+in\s+(.+?))?"#).unwrap(),
-                Regex::new(r"(?i)(?:list|show)\s+(?:the\s+)?(?:contents?\s+of\s+)?(?:directory\s+)?(.+)").unwrap(),
-            ],
-            project_patterns: vec![
-                Regex::new(r"(?i)(?:create|make|generate|start)\s+(?:a\s+)?(?:new\s+)?(.+?)\s+project\s+(?:named\s+|called\s+)?(.+?)(?:\s+in\s+(.+?))?").unwrap(),
-                Regex::new(r"(?i)(?:initialize|init)\s+(?:a\s+)?(.+?)\s+project\s+(.+?)").unwrap(),
-            ],
-            command_patterns: vec![
-                Regex::new(r"(?i)(?:run|execute|cmd)\s+(.+)").unwrap(),
-                Regex::new(r"(?i)(?:install|update|upgrade)\s+(.+)").unwrap(),
-                Regex::new(r"(?i)(?:git\s+|npm\s+|cargo\s+|pip\s+)(.+)").unwrap(),
-            ],
-        }
+        Self {}
     }
 
-    pub fn parse_request(&self, input: &str) -> Vec<AvailableTool> {
+    pub async fn parse_request_with_llm(
+        &self,
+        input: &str,
+        llm_client: &crate::client::SelectedModel,
+    ) -> Vec<AvailableTool> {
+        let analysis_prompt = self.build_analysis_prompt(input);
+
+        // Get LLM response
+        match crate::client::stream_response(llm_client, &analysis_prompt).await {
+            Ok(response) => {
+                // Parse the LLM's JSON response
+                if let Ok(analysis) = self.parse_llm_response(&response) {
+                    return self.convert_to_tools(analysis);
+                }
+            }
+            Err(e) => {
+                println!("{} Error getting LLM analysis: {}", "⚠".yellow(), e);
+            }
+        }
+
+        // Fallback to simple keyword detection if LLM fails
+        self.simple_fallback_parse(input)
+    }
+
+    fn build_analysis_prompt(&self, user_input: &str) -> String {
+        format!(
+            r#"Analyze this user request and determine which tools are needed. 
+
+User request: "{}"
+
+Available tools:
+1. WebSearch - search the internet for information
+2. WebScrape - scrape content from a specific URL
+3. FileRead - read a file from the filesystem
+4. FileWrite - write content to a file
+5. FileEdit - edit an existing file
+6. FileSearch - search for files by name pattern
+7. ContentSearch - search for text content within files
+8. ListDirectory - list files in a directory
+9. CreateProject - create a new project (Rust, Python, JS, etc.)
+10. ExecuteCommand - run a system command
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "reasoning": "Brief explanation of what the user wants",
+  "tools": [
+    {{
+      "tool_type": "ToolName",
+      "parameters": {{
+        "param1": "value1",
+        "param2": "value2"
+      }},
+      "reasoning": "Why this tool is needed"
+    }}
+  ]
+}}
+
+Examples:
+- "read the cargo.toml file" → FileRead with path "Cargo.toml"
+- "search for rust programming" → WebSearch with query "rust programming"
+- "list files in src directory" → ListDirectory with path "src"
+- "create a rust project called myapp" → CreateProject with name "myapp", project_type "rust"
+
+Analyze the request and respond with JSON only:"#,
+            user_input
+        )
+    }
+
+    fn parse_llm_response(&self, response: &str) -> Result<ToolAnalysis, serde_json::Error> {
+        // Extract JSON from the response (in case there's extra text)
+        if let Some(start) = response.find('{') {
+            if let Some(end) = response.rfind('}') {
+                let json_str = &response[start..=end];
+                return serde_json::from_str(json_str);
+            }
+        }
+
+        // Try parsing the whole response as JSON
+        serde_json::from_str(response)
+    }
+
+    fn convert_to_tools(&self, analysis: ToolAnalysis) -> Vec<AvailableTool> {
         let mut tools = Vec::new();
 
-        // Try web search patterns
-        for pattern in &self.web_patterns {
-            if let Some(captures) = pattern.captures(input) {
-                let query = captures.get(1).unwrap().as_str().trim();
+        println!(
+            "{} LLM Analysis: {}",
+            "🧠".cyan(),
+            analysis.reasoning.blue()
+        );
 
-                if query.starts_with("http") || input.to_lowercase().contains("scrape") {
-                    tools.push(AvailableTool::WebScrape {
-                        url: query.to_string(),
-                    });
-                } else {
-                    tools.push(AvailableTool::WebSearch {
-                        query: query.to_string(),
-                    });
+        for tool_req in analysis.tools {
+            println!(
+                "  {} {} - {}",
+                "→".blue(),
+                tool_req.tool_type.yellow(),
+                tool_req.reasoning.dimmed()
+            );
+
+            match tool_req.tool_type.as_str() {
+                "FileRead" => {
+                    if let Some(path) = tool_req.parameters.get("path").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::FileRead {
+                            path: path.to_string(),
+                        });
+                    }
                 }
-                break;
-            }
-        }
-
-        // Try file operation patterns
-        for pattern in &self.file_patterns {
-            if let Some(captures) = pattern.captures(input) {
-                let main_param = captures.get(1).unwrap().as_str().trim();
-                let optional_param = captures.get(2).map(|m| m.as_str().trim());
-
-                if input.to_lowercase().contains("read")
-                    || input.to_lowercase().contains("show")
-                    || input.to_lowercase().contains("cat")
-                {
-                    tools.push(AvailableTool::FileRead {
-                        path: main_param.to_string(),
-                    });
-                } else if input.to_lowercase().contains("write")
-                    || input.to_lowercase().contains("create")
-                {
-                    let content = optional_param.unwrap_or("").to_string();
-                    tools.push(AvailableTool::FileWrite {
-                        path: main_param.to_string(),
-                        content,
-                    });
-                } else if input.to_lowercase().contains("edit")
-                    || input.to_lowercase().contains("modify")
-                    || input.to_lowercase().contains("change")
-                {
-                    let operation = self.parse_edit_operation(input, main_param);
-                    tools.push(AvailableTool::FileEdit {
-                        path: main_param.to_string(),
-                        operation,
-                    });
-                } else if input.to_lowercase().contains("search")
-                    && (input.contains("\"") || input.contains("'"))
-                {
-                    tools.push(AvailableTool::ContentSearch {
-                        pattern: main_param.to_string(),
-                        directory: optional_param.map(|s| s.to_string()),
-                    });
-                } else if input.to_lowercase().contains("list") {
-                    tools.push(AvailableTool::ListDirectory {
-                        path: main_param.to_string(),
-                    });
-                } else {
-                    tools.push(AvailableTool::FileSearch {
-                        pattern: main_param.to_string(),
-                        directory: optional_param.map(|s| s.to_string()),
-                    });
+                "FileWrite" => {
+                    if let Some(path) = tool_req.parameters.get("path").and_then(|v| v.as_str()) {
+                        let content = tool_req
+                            .parameters
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        tools.push(AvailableTool::FileWrite {
+                            path: path.to_string(),
+                            content,
+                        });
+                    }
                 }
-                break;
-            }
-        }
-
-        // Try project creation patterns
-        for pattern in &self.project_patterns {
-            if let Some(captures) = pattern.captures(input) {
-                let project_type = captures.get(1).unwrap().as_str().trim();
-                let name = captures.get(2).unwrap().as_str().trim();
-                let path = captures.get(3).map(|m| m.as_str().trim().to_string());
-
-                tools.push(AvailableTool::CreateProject {
-                    name: name.to_string(),
-                    project_type: project_type.to_string(),
-                    path,
-                });
-                break;
-            }
-        }
-
-        // Try command execution patterns
-        for pattern in &self.command_patterns {
-            if let Some(captures) = pattern.captures(input) {
-                let command = if input.to_lowercase().starts_with("run ")
-                    || input.to_lowercase().starts_with("execute ")
-                {
-                    captures.get(1).unwrap().as_str().trim().to_string()
-                } else {
-                    input.trim().to_string()
-                };
-
-                tools.push(AvailableTool::ExecuteCommand { command });
-                break;
+                "WebSearch" => {
+                    if let Some(query) = tool_req.parameters.get("query").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::WebSearch {
+                            query: query.to_string(),
+                        });
+                    }
+                }
+                "WebScrape" => {
+                    if let Some(url) = tool_req.parameters.get("url").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::WebScrape {
+                            url: url.to_string(),
+                        });
+                    }
+                }
+                "ListDirectory" => {
+                    if let Some(path) = tool_req.parameters.get("path").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::ListDirectory {
+                            path: path.to_string(),
+                        });
+                    }
+                }
+                "FileSearch" => {
+                    if let Some(pattern) =
+                        tool_req.parameters.get("pattern").and_then(|v| v.as_str())
+                    {
+                        let directory = tool_req
+                            .parameters
+                            .get("directory")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        tools.push(AvailableTool::FileSearch {
+                            pattern: pattern.to_string(),
+                            directory,
+                        });
+                    }
+                }
+                "ContentSearch" => {
+                    if let Some(pattern) =
+                        tool_req.parameters.get("pattern").and_then(|v| v.as_str())
+                    {
+                        let directory = tool_req
+                            .parameters
+                            .get("directory")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        tools.push(AvailableTool::ContentSearch {
+                            pattern: pattern.to_string(),
+                            directory,
+                        });
+                    }
+                }
+                "CreateProject" => {
+                    if let Some(name) = tool_req.parameters.get("name").and_then(|v| v.as_str()) {
+                        if let Some(project_type) = tool_req
+                            .parameters
+                            .get("project_type")
+                            .and_then(|v| v.as_str())
+                        {
+                            let path = tool_req
+                                .parameters
+                                .get("path")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            tools.push(AvailableTool::CreateProject {
+                                name: name.to_string(),
+                                project_type: project_type.to_string(),
+                                path,
+                            });
+                        }
+                    }
+                }
+                "ExecuteCommand" => {
+                    if let Some(command) =
+                        tool_req.parameters.get("command").and_then(|v| v.as_str())
+                    {
+                        tools.push(AvailableTool::ExecuteCommand {
+                            command: command.to_string(),
+                        });
+                    }
+                }
+                "FileEdit" => {
+                    if let Some(path) = tool_req.parameters.get("path").and_then(|v| v.as_str()) {
+                        let operation = EditOperation::Append {
+                            content: "# File edit operation".to_string(),
+                        };
+                        tools.push(AvailableTool::FileEdit {
+                            path: path.to_string(),
+                            operation,
+                        });
+                    }
+                }
+                _ => {
+                    println!(
+                        "  {} Unknown tool type: {}",
+                        "⚠".yellow(),
+                        tool_req.tool_type
+                    );
+                }
             }
         }
 
         tools
     }
 
-    fn parse_edit_operation(&self, input: &str, _file_path: &str) -> EditOperation {
-        if let Ok(replace_regex) =
-            Regex::new(r#"(?i)replace\s+["'](.+?)["']\s+with\s+["'](.+?)["']"#)
-        {
-            if let Some(captures) = replace_regex.captures(input) {
-                let old = captures.get(1).unwrap().as_str().to_string();
-                let new = captures.get(2).unwrap().as_str().to_string();
-                return EditOperation::Replace { old, new };
-            }
+    fn simple_fallback_parse(&self, input: &str) -> Vec<AvailableTool> {
+        let lower = input.to_lowercase();
+
+        // Simple keyword-based fallback
+        if lower.contains("read") && (lower.contains("cargo") || lower.contains("toml")) {
+            return vec![AvailableTool::FileRead {
+                path: "Cargo.toml".to_string(),
+            }];
         }
 
-        if let Ok(insert_regex) = Regex::new(r"(?i)insert\s+(.+?)\s+at\s+line\s+(\d+)") {
-            if let Some(captures) = insert_regex.captures(input) {
-                let content = captures.get(1).unwrap().as_str().to_string();
-                let line = captures
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse::<usize>()
-                    .unwrap_or(1);
-                return EditOperation::Insert { line, content };
-            }
+        if lower.contains("list") && (lower.contains("directory") || lower.contains("files")) {
+            return vec![AvailableTool::ListDirectory {
+                path: ".".to_string(),
+            }];
         }
 
-        if input.to_lowercase().contains("append") || input.to_lowercase().contains("add to end") {
-            if let Ok(append_regex) = Regex::new(r#"(?i)(?:append|add)\s+["'](.+?)["']"#) {
-                if let Some(captures) = append_regex.captures(input) {
-                    let content = captures.get(1).unwrap().as_str().to_string();
-                    return EditOperation::Append { content };
-                }
-            }
+        if lower.contains("search") && !lower.contains("file") {
+            // Extract search query (simple approach)
+            let query = input
+                .replace("search for", "")
+                .replace("search", "")
+                .trim()
+                .to_string();
+            return vec![AvailableTool::WebSearch { query }];
         }
 
-        EditOperation::Append {
-            content: "# Edit operation could not be parsed".to_string(),
-        }
+        vec![]
+    }
+
+    // Keep this for backward compatibility
+    pub fn parse_request(&self, input: &str) -> Vec<AvailableTool> {
+        self.simple_fallback_parse(input)
     }
 
     pub fn suggest_clarification(&self, input: &str) -> Option<String> {
         let lower_input = input.to_lowercase();
 
         if lower_input.contains("file") {
-            Some("I can help with file operations. Try: 'read file.txt', 'search for *.rs files', or 'create file.txt with content Hello'".to_string())
+            Some("I can help with file operations. Try: 'read Cargo.toml', 'search for *.rs files', or 'create file.txt with content Hello'".to_string())
         } else if lower_input.contains("search") {
             Some("I can search the web or files. Try: 'search for rust programming' or 'search for \"function main\" in src/'".to_string())
         } else if lower_input.contains("project") {

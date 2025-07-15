@@ -2,7 +2,7 @@ use colored::Colorize;
 use dialoguer::Input;
 use std::time::Instant;
 
-use crate::client::{SelectedModel, stream_response};
+use crate::client::{stream_response, SelectedModel};
 use crate::tools::{
     AvailableTool, NaturalLanguageParser, PermissionManager, ToolExecutor, ToolResult,
 };
@@ -64,6 +64,10 @@ impl AssistantSession {
         println!("  {} System commands (with permission)", "•".blue());
         println!("  {} And anything else you can think of!", "•".blue());
         println!();
+        println!(
+            "{}",
+            "Now using LLM-powered tool selection for better accuracy!".green()
+        );
         println!("{}", "Type 'quit' or 'exit' to end the session".dimmed());
         println!();
     }
@@ -74,7 +78,12 @@ impl AssistantSession {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let start_time = Instant::now();
 
-        let tools = self.parser.parse_request(user_input);
+        // Use LLM to analyze and determine tools
+        println!("{} Analyzing request with AI...", "🧠".cyan());
+        let tools = self
+            .parser
+            .parse_request_with_llm(user_input, &self.model)
+            .await;
 
         if tools.is_empty() {
             self.handle_general_conversation(user_input).await?;
@@ -92,15 +101,12 @@ impl AssistantSession {
         Ok(())
     }
 
+    // ... rest of the methods remain the same as before
+
     async fn handle_general_conversation(
         &mut self,
         user_input: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(suggestion) = self.parser.suggest_clarification(user_input) {
-            println!("{} {}", "💡".yellow(), suggestion.blue());
-            println!();
-        }
-
         let context = self.build_conversation_context(user_input);
         let response = stream_response(&self.model, &context).await?;
 
@@ -115,11 +121,7 @@ impl AssistantSession {
         user_input: &str,
         tools: Vec<AvailableTool>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!(
-            "{} Identified {} tool(s) for your request",
-            "🔧".cyan(),
-            tools.len()
-        );
+        println!("{} Executing {} tool(s)", "🔧".cyan(), tools.len());
 
         let mut tool_results = Vec::new();
 

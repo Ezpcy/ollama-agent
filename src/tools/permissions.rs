@@ -133,6 +133,7 @@ impl PermissionManager {
             AvailableTool::ListDirectory { path } => {
                 (format!("List directory: {}", path), RiskLevel::Safe)
             }
+            _ => (format!("Run tool: {:?}", tool), RiskLevel::Moderate),
         }
     }
 

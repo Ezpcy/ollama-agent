@@ -388,12 +388,12 @@ impl ToolExecutor {
         let mut cmd = Command::new("docker");
         cmd.args(["build"]);
 
-        if let Some(dockerfile_path) = dockerfile {
-            cmd.args(["-f", &dockerfile_path]);
+        if let Some(ref dockerfile_path) = dockerfile {
+            cmd.args(["-f", dockerfile_path]);
         }
 
-        if let Some(tag_value) = tag {
-            cmd.args(["-t", &tag_value]);
+        if let Some(ref tag_value) = tag {
+            cmd.args(["-t", tag_value]);
         }
 
         cmd.arg(context_path);
@@ -411,7 +411,7 @@ impl ToolExecutor {
                 metadata: Some(serde_json::json!({
                     "tag": tag_name,
                     "context_path": context_path,
-                    "dockerfile": dockerfile,
+                    "dockerfile": dockerfile.clone(),
                     "type": "image_build"
                 })),
             })
@@ -434,8 +434,8 @@ impl ToolExecutor {
 
         let mut cmd = Command::new("docker-compose");
 
-        if let Some(file) = compose_file {
-            cmd.args(["-f", &file]);
+        if let Some(ref file) = compose_file {
+            cmd.args(["-f", file]);
         }
 
         cmd.arg("up");
@@ -455,7 +455,7 @@ impl ToolExecutor {
                 Some(String::from_utf8_lossy(&output.stderr).to_string())
             },
             metadata: Some(serde_json::json!({
-                "compose_file": compose_file,
+                "compose_file": compose_file.clone(),
                 "detached": detached,
                 "type": "compose_up"
             })),

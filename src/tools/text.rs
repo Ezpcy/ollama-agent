@@ -276,13 +276,13 @@ impl ToolExecutor {
             TextOperation::ToUpperCase => input.to_uppercase(),
             TextOperation::ToLowerCase => input.to_lowercase(),
             TextOperation::Trim => input.trim().to_string(),
-            TextOperation::Count { pattern } => {
-                let count = input.matches(&pattern).count();
+            TextOperation::Count { ref pattern } => {
+                let count = input.matches(pattern).count();
                 format!("Pattern '{}' found {} times", pattern, count)
             }
-            TextOperation::Replace { old, new } => input.replace(&old, &new),
-            TextOperation::Split { delimiter } => {
-                let parts: Vec<&str> = input.split(&delimiter).collect();
+            TextOperation::Replace { ref old, ref new } => input.replace(old, new),
+            TextOperation::Split { ref delimiter } => {
+                let parts: Vec<&str> = input.split(delimiter.as_str()).collect();
                 format!(
                     "Split into {} parts:\n{}",
                     parts.len(),
@@ -294,7 +294,7 @@ impl ToolExecutor {
                         .join("\n")
                 )
             }
-            TextOperation::Join { delimiter } => {
+            TextOperation::Join { ref delimiter } => {
                 // Assume input is newline-separated for joining
                 let lines: Vec<&str> = input.lines().collect();
                 lines.join(&delimiter)

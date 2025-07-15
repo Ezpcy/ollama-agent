@@ -51,6 +51,7 @@ impl ToolExecutor {
                 results.join("\n")
             },
             error: None,
+            metadata: None,
         })
     }
 
@@ -108,6 +109,7 @@ impl ToolExecutor {
                 content.join("\n\n")
             },
             error: None,
+            metadata: None,
         })
     }
 
@@ -147,6 +149,7 @@ impl ToolExecutor {
                 found_files.join("\n")
             },
             error: None,
+            metadata: None,
         })
     }
 
@@ -158,11 +161,13 @@ impl ToolExecutor {
                 success: true,
                 output: content,
                 error: None,
+                metadata: None,
             }),
             Err(e) => Ok(ToolResult {
                 success: false,
                 output: String::new(),
                 error: Some(e.to_string()),
+                metadata: None,
             }),
         }
     }
@@ -183,11 +188,13 @@ impl ToolExecutor {
                 success: true,
                 output: format!("Successfully wrote {} bytes to {}", content.len(), path),
                 error: None,
+                metadata: None,
             }),
             Err(e) => Ok(ToolResult {
                 success: false,
                 output: String::new(),
                 error: Some(e.to_string()),
+                metadata: None,
             }),
         }
     }
@@ -206,6 +213,7 @@ impl ToolExecutor {
                     success: false,
                     output: String::new(),
                     error: Some(format!("Could not read file {}: {}", path, e)),
+                    metadata: None,
                 });
             }
         };
@@ -219,6 +227,7 @@ impl ToolExecutor {
                         success: false,
                         output: String::new(),
                         error: Some(format!("Text '{}' not found in file", old)),
+                        metadata: None,
                     });
                 }
             }
@@ -236,6 +245,7 @@ impl ToolExecutor {
                             line,
                             lines.len()
                         )),
+                        metadata: None,
                     });
                 }
             }
@@ -273,6 +283,7 @@ impl ToolExecutor {
                             end,
                             lines.len()
                         )),
+                        metadata: None,
                     });
                 }
             }
@@ -302,12 +313,14 @@ impl ToolExecutor {
                     success: true,
                     output: format!("{} in {}", operation_desc, path),
                     error: None,
+                    metadata: None,
                 })
             }
             Err(e) => Ok(ToolResult {
                 success: false,
                 output: String::new(),
                 error: Some(format!("Could not write to file {}: {}", path, e)),
+                metadata: None,
             }),
         }
     }
@@ -354,6 +367,7 @@ impl ToolExecutor {
                 results.join("\n")
             },
             error: None,
+            metadata: None,
         })
     }
 
@@ -380,6 +394,7 @@ impl ToolExecutor {
             } else {
                 Some(stderr.to_string())
             },
+            metadata: None,
         })
     }
 
@@ -411,6 +426,7 @@ impl ToolExecutor {
             success: true,
             output: items.join("\n"),
             error: None,
+            metadata: None,
         })
     }
 
@@ -446,6 +462,7 @@ impl ToolExecutor {
                 project_type, name, result_msg
             ),
             error: None,
+            metadata: None,
         })
     }
 

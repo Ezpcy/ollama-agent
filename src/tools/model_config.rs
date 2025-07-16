@@ -1,8 +1,8 @@
 use super::core::{ModelParameter, ToolExecutor, ToolResult};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use lazy_static::lazy_static;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
@@ -286,7 +286,7 @@ impl ToolExecutor {
                     model_name,
                     available_models
                         .iter()
-                        .map(|m| m.name.clone())
+                        .map(|m| &m.name)
                         .collect::<Vec<_>>()
                         .join(", ")
                 )),

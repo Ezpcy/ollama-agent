@@ -133,6 +133,14 @@ impl PermissionManager {
             AvailableTool::ListDirectory { path } => {
                 (format!("List directory: {}", path), RiskLevel::Safe)
             }
+            AvailableTool::FileWatch { path, duration_seconds } => {
+                let duration_desc = if let Some(duration) = duration_seconds {
+                    format!(" for {} seconds", duration)
+                } else {
+                    " for 30 seconds".to_string()
+                };
+                (format!("Watch file '{}'{}", path, duration_desc), RiskLevel::Safe)
+            }
             _ => (format!("Run tool: {:?}", tool), RiskLevel::Moderate),
         }
     }

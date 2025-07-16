@@ -346,13 +346,20 @@ pub fn get_current_model_config() -> ModelConfig {
     MODEL_CONFIG.lock().unwrap().clone()
 }
 
+// Function to update the current model in the global config
+pub fn set_current_model(model_name: &str) {
+    if let Ok(mut config) = MODEL_CONFIG.lock() {
+        config.current_model = model_name.to_string();
+    }
+}
+
 // Function to create enhanced request with current parameters
-pub fn create_enhanced_request(model: &str, prompt: &str, stream: bool) -> EnhancedOllamaRequest {
+pub fn create_enhanced_request(_model: &str, prompt: &str, stream: bool) -> EnhancedOllamaRequest {
     let config = get_current_model_config();
 
     EnhancedOllamaRequest {
-        model: model.to_string(),
-        prompt: if config.system_prompt.is_empty() {
+        model: config.current_model.clone(), // Use the current model from config, not the parameter
+        prompt: if config.system_prompt.is_empty() || config.system_prompt == "You are a helpful AI assistant." {
             prompt.to_string()
         } else {
             format!("{}\n\nUser: {}", config.system_prompt, prompt)

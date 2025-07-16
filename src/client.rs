@@ -4,6 +4,10 @@ use futures::StreamExt as FuturesStreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::select;
+use tokio::time::{sleep, Duration};
 use tokio_stream::StreamExt;
 
 #[derive(Deserialize, Debug)]
@@ -201,43 +205,90 @@ pub async fn stream_response(
     let mut full_response = String::new();
     let mut stats = ResponseStats::new();
 
-    while let Some(chunk_result) = FuturesStreamExt::next(&mut stream).await {
-        let chunk = chunk_result?;
-        let text = String::from_utf8_lossy(&chunk);
+    // Setup interrupt handling
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let interrupted_clone = interrupted.clone();
+    
+    // Setup Ctrl+C handler
+    let _handle = tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        interrupted_clone.store(true, Ordering::Relaxed);
+    });
 
-        for line in text.lines() {
-            if line.trim().is_empty() {
-                continue;
+    println!("{}", "Press Ctrl+C to stop response generation...".dimmed());
+
+    loop {
+        // Check for interrupt before processing
+        if interrupted.load(Ordering::Relaxed) {
+            println!();
+            println!("{}", "Response generation stopped by user".yellow());
+            if !full_response.is_empty() {
+                println!(); // New line after response
+                stats.print_stats();
             }
+            return Ok(full_response);
+        }
 
-            match serde_json::from_str::<OllamaResponse>(line) {
-                Ok(ollama_response) => {
-                    if let Some(token) = ollama_response.response {
-                        print!("{}", token);
-                        io::stdout().flush().unwrap();
-                        full_response.push_str(&token);
-                        stats.tokens_generated += 1;
+        select! {
+            chunk_result = FuturesStreamExt::next(&mut stream) => {
+                match chunk_result {
+                    Some(Ok(chunk)) => {
+                        let text = String::from_utf8_lossy(&chunk);
+
+                        for line in text.lines() {
+                            if line.trim().is_empty() {
+                                continue;
+                            }
+
+                            // Check for interrupt during line processing
+                            if interrupted.load(Ordering::Relaxed) {
+                                println!();
+                                println!("{}", "Response generation stopped by user".yellow());
+                                if !full_response.is_empty() {
+                                    println!(); // New line after response
+                                    stats.print_stats();
+                                }
+                                return Ok(full_response);
+                            }
+
+                            match serde_json::from_str::<OllamaResponse>(line) {
+                                Ok(ollama_response) => {
+                                    if let Some(token) = ollama_response.response {
+                                        print!("{}", token);
+                                        io::stdout().flush().unwrap();
+                                        full_response.push_str(&token);
+                                        stats.tokens_generated += 1;
+                                    }
+
+                                    if ollama_response.done {
+                                        // Extract performance statistics
+                                        if let Some(total_duration) = ollama_response.total_duration {
+                                            stats.total_duration_ns = total_duration;
+                                        }
+                                        if let Some(eval_count) = ollama_response.eval_count {
+                                            stats.eval_count = eval_count;
+                                        }
+                                        if let Some(eval_duration) = ollama_response.eval_duration {
+                                            stats.eval_duration_ns = eval_duration;
+                                        }
+
+                                        // Print performance stats
+                                        println!(); // New line after response
+                                        stats.print_stats();
+                                        return Ok(full_response);
+                                    }
+                                }
+                                Err(_) => continue,
+                            }
+                        }
                     }
-
-                    if ollama_response.done {
-                        // Extract performance statistics
-                        if let Some(total_duration) = ollama_response.total_duration {
-                            stats.total_duration_ns = total_duration;
-                        }
-                        if let Some(eval_count) = ollama_response.eval_count {
-                            stats.eval_count = eval_count;
-                        }
-                        if let Some(eval_duration) = ollama_response.eval_duration {
-                            stats.eval_duration_ns = eval_duration;
-                        }
-
-                        // Print performance stats
-                        println!(); // New line after response
-                        stats.print_stats();
-                        break;
-                    }
+                    Some(Err(e)) => return Err(e.into()),
+                    None => break,
                 }
-                Err(_) => continue,
+            }
+            _ = sleep(Duration::from_millis(50)) => {
+                // Check interrupt more frequently
+                continue;
             }
         }
     }

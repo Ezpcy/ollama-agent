@@ -1,8 +1,8 @@
 use colored::Colorize;
-use dialoguer::Input;
 use std::time::Instant;
 
 use crate::client::{stream_response, SelectedModel};
+use crate::input::VimInputHandler;
 use crate::tools::{
     AvailableTool, ConversationEntry, NaturalLanguageParser, PermissionManager,
     ToolExecutor, ToolResult,
@@ -15,6 +15,7 @@ pub struct AssistantSession {
     parser: NaturalLanguageParser,
     conversation_history: Vec<ConversationEntry>,
     session_stats: SessionStats,
+    vim_handler: VimInputHandler,
 }
 
 #[derive(Debug, Default)]
@@ -28,6 +29,9 @@ struct SessionStats {
 
 impl AssistantSession {
     pub fn new(model: SelectedModel, tool_executor: ToolExecutor) -> Self {
+        // Initialize the global config with the selected model
+        Self::init_global_config(&model);
+        
         Self {
             model,
             tool_executor,
@@ -35,7 +39,21 @@ impl AssistantSession {
             parser: NaturalLanguageParser::new(),
             conversation_history: Vec::new(),
             session_stats: SessionStats::default(),
+            vim_handler: VimInputHandler::new(),
         }
+    }
+
+    pub fn with_vim_mode(model: SelectedModel, tool_executor: ToolExecutor, vim_enabled: bool) -> Self {
+        let mut session = Self::new(model, tool_executor);
+        if vim_enabled {
+            session.vim_handler.enable_vim_mode();
+        }
+        session
+    }
+
+    fn init_global_config(model: &SelectedModel) {
+        // Update the global model config to reflect the current model
+        crate::tools::model_config::set_current_model(&model.name);
     }
 
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -62,6 +80,13 @@ impl AssistantSession {
 
             if self.is_help_command(&user_input) {
                 self.show_help();
+                continue;
+            }
+
+            if self.is_switch_model_command(&user_input) {
+                if let Err(e) = self.handle_model_switch(&user_input).await {
+                    println!("{} Error switching model: {}", "❌".red(), e);
+                }
                 continue;
             }
 
@@ -440,15 +465,14 @@ impl AssistantSession {
         context
     }
 
-    fn get_user_input(&self) -> Result<String, Box<dyn std::error::Error>> {
+    fn get_user_input(&mut self) -> Result<String, Box<dyn std::error::Error>> {
         let prompt = if self.model.is_code_model() {
             "🤖 [Code Model] How can I help you?"
         } else {
             "🤖 How can I help you?"
         };
 
-        let input: String = Input::new().with_prompt(prompt).interact_text()?;
-
+        let input = self.vim_handler.get_input(prompt)?;
         Ok(input)
     }
 
@@ -468,6 +492,55 @@ impl AssistantSession {
             lower.as_str(),
             "help" | "?" | "commands" | "what can you do"
         )
+    }
+
+    fn is_switch_model_command(&self, input: &str) -> bool {
+        let lower = input.trim().to_lowercase();
+        lower.starts_with("switch to") || lower.starts_with("use model") || lower.starts_with("change model")
+    }
+
+    async fn handle_model_switch(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let lower = input.trim().to_lowercase();
+        
+        let model_name = if let Some(name) = lower.strip_prefix("switch to ") {
+            name.trim()
+        } else if let Some(name) = lower.strip_prefix("use model ") {
+            name.trim()
+        } else if let Some(name) = lower.strip_prefix("change model to ") {
+            name.trim()
+        } else {
+            return Err("Invalid model switch command".into());
+        };
+
+        // Get available models
+        let available_models = crate::client::fetch_models().await?;
+        
+        // Find the model
+        if let Some(model) = available_models.iter().find(|m| m.name.to_lowercase().contains(model_name)) {
+            let old_model = self.model.name.clone();
+            
+            // Update the global model config first
+            let result = self.tool_executor.switch_model(&model.name).await?;
+            
+            if result.success {
+                // Update the session's model
+                self.model = crate::client::SelectedModel::from(model.clone());
+                
+                println!("{} Successfully switched from '{}' to '{}'", 
+                        "✅".green(), old_model, model.name);
+                self.model.display_info();
+            } else {
+                return Err(result.error.unwrap_or("Unknown error switching model".to_string()).into());
+            }
+        } else {
+            let available_names: Vec<String> = available_models.iter().map(|m| m.name.clone()).collect();
+            println!("{} Model '{}' not found. Available models:", "❌".red(), model_name);
+            for name in available_names {
+                println!("  • {}", name.yellow());
+            }
+        }
+        
+        Ok(())
     }
 
     fn show_session_stats(&self) {

@@ -1,3 +1,3 @@
 mod vim_handler;
 
-// pub use vim_handler::{InputMode, VimInputHandler};
+pub use vim_handler::VimInputHandler;

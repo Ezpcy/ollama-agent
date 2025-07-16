@@ -364,11 +364,11 @@ async fn start_chat_session(
     let tool_executor = ToolExecutor::with_config(tool_config);
 
     // Start enhanced assistant session
-    let mut session = AssistantSession::new(selected_model, tool_executor);
+    let mut session = AssistantSession::with_vim_mode(selected_model, tool_executor, vim_mode);
 
-    // TODO: Implement vim mode support
     if vim_mode {
-        println!("Vim mode requested but not yet implemented");
+        println!("{}", "Vim mode enabled! Use 'ESC' to enter normal mode, 'i' to enter insert mode.".green());
+        println!("{}", "Type ':help' in command mode for vim commands.".dimmed());
     }
 
     session.run().await?;
@@ -789,12 +789,7 @@ async fn execute_single_command(
 
     // Create session and execute command
     let tool_executor = ToolExecutor::new();
-    let mut session = AssistantSession::new(selected_model, tool_executor);
-
-    // TODO: Implement vim mode support
-    if vim_mode {
-        println!("Vim mode requested but not yet implemented");
-    }
+    let mut session = AssistantSession::with_vim_mode(selected_model, tool_executor, vim_mode);
 
     session.process_single_command(command).await?;
 

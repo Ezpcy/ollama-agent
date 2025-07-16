@@ -12,8 +12,12 @@ impl ToolExecutor {
         let mut cmd = Command::new("git");
         cmd.arg("status").arg("--porcelain");
 
+        // Validate repository_path before using it
         if let Some(path) = repository_path {
-            cmd.current_dir(path);
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                cmd.current_dir(path);
+            }
+            // If path is invalid, just use current directory (no current_dir call)
         }
 
         let output = cmd.output()?;
@@ -60,8 +64,12 @@ impl ToolExecutor {
             cmd.arg(file);
         }
 
+        // Validate repository_path before using it
         if let Some(path) = repository_path {
-            cmd.current_dir(path);
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                cmd.current_dir(path);
+            }
+            // If path is invalid, just use current directory (no current_dir call)
         }
 
         let output = cmd.output()?;
@@ -92,8 +100,12 @@ impl ToolExecutor {
         let mut cmd = Command::new("git");
         cmd.arg("commit").arg("-m").arg(message);
 
+        // Validate repository_path before using it
         if let Some(path) = repository_path {
-            cmd.current_dir(path);
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                cmd.current_dir(path);
+            }
+            // If path is invalid, just use current directory (no current_dir call)
         }
 
         let output = cmd.output()?;
@@ -129,8 +141,12 @@ impl ToolExecutor {
         let mut cmd = Command::new("git");
         cmd.arg("push").arg(remote).arg(branch);
 
+        // Validate repository_path before using it
         if let Some(path) = repository_path {
-            cmd.current_dir(path);
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                cmd.current_dir(path);
+            }
+            // If path is invalid, just use current directory (no current_dir call)
         }
 
         let output = cmd.output()?;
@@ -164,8 +180,12 @@ impl ToolExecutor {
             cmd.arg(branch);
         }
 
+        // Validate repository_path before using it
         if let Some(path) = repository_path {
-            cmd.current_dir(path);
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                cmd.current_dir(path);
+            }
+            // If path is invalid, just use current directory (no current_dir call)
         }
 
         let output = cmd.output()?;
@@ -212,8 +232,12 @@ impl ToolExecutor {
             }
         }
 
+        // Validate repository_path before using it
         if let Some(path) = repository_path {
-            cmd.current_dir(path);
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                cmd.current_dir(path);
+            }
+            // If path is invalid, just use current directory (no current_dir call)
         }
 
         let output = cmd.output()?;
@@ -251,8 +275,12 @@ impl ToolExecutor {
             cmd.arg("--pretty=format:%h - %an, %ar : %s");
         }
 
+        // Validate repository_path before using it
         if let Some(path) = repository_path {
-            cmd.current_dir(path);
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                cmd.current_dir(path);
+            }
+            // If path is invalid, just use current directory (no current_dir call)
         }
 
         let output = cmd.output()?;
@@ -288,8 +316,12 @@ impl ToolExecutor {
             cmd.arg(file);
         }
 
+        // Validate repository_path before using it
         if let Some(path) = repository_path {
-            cmd.current_dir(path);
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                cmd.current_dir(path);
+            }
+            // If path is invalid, just use current directory (no current_dir call)
         }
 
         let output = cmd.output()?;

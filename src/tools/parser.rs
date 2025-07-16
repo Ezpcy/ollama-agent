@@ -289,9 +289,57 @@ Analyze the request and respond with JSON only:"#,
                     }
                 }
                 "WebSearch" => {
-                    if let Some(query) = tool_req.parameters.get("query").and_then(|v| v.as_str()) {
+                    if let Some(query) = tool_req
+                        .parameters
+                        .get("query")
+                        .or_else(|| tool_req.parameters.get("search"))
+                        .and_then(|v| v.as_str())
+                    {
                         tools.push(AvailableTool::WebSearch {
                             query: query.to_string(),
+                        });
+                    }
+                }
+                "FileSearch" => {
+                    let pattern = tool_req
+                        .parameters
+                        .get("pattern")
+                        .or_else(|| tool_req.parameters.get("name"))
+                        .or_else(|| tool_req.parameters.get("filename"))
+                        .and_then(|v| v.as_str());
+
+                    let directory = tool_req
+                        .parameters
+                        .get("directory")
+                        .or_else(|| tool_req.parameters.get("path"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    if let Some(pattern) = pattern {
+                        tools.push(AvailableTool::FileSearch {
+                            pattern: pattern.to_string(),
+                            directory,
+                        });
+                    }
+                }
+                "ContentSearch" => {
+                    let pattern = tool_req
+                        .parameters
+                        .get("pattern")
+                        .or_else(|| tool_req.parameters.get("text"))
+                        .and_then(|v| v.as_str());
+
+                    let directory = tool_req
+                        .parameters
+                        .get("directory")
+                        .or_else(|| tool_req.parameters.get("path"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    if let Some(pattern) = pattern {
+                        tools.push(AvailableTool::ContentSearch {
+                            pattern: pattern.to_string(),
+                            directory,
                         });
                     }
                 }

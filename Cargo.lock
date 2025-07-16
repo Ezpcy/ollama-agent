@@ -1336,7 +1336,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ollama-agent"
+name = "ollama-cli-assistant"
 version = "0.1.0"
 dependencies = [
  "anyhow",

@@ -1,5 +1,8 @@
 use colored::Colorize;
 use regex::Regex;
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
+use globset::GlobBuilder;
 use scraper::{Html, Selector};
 use std::fs;
 use std::path::Path;
@@ -127,16 +130,37 @@ impl ToolExecutor {
             search_dir.blue()
         );
 
-        let regex = Regex::new(pattern)?;
+        let matcher = SkimMatcherV2::default();
+        let mut glob_matcher = None;
+        if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+            if let Ok(glob) = GlobBuilder::new(pattern).case_insensitive(true).build() {
+                glob_matcher = Some(glob.compile_matcher());
+            }
+        }
+
         let mut found_files = Vec::new();
 
         for entry in WalkDir::new(search_dir).follow_links(true) {
             let entry = entry?;
-            if entry.file_type().is_file() {
-                if let Some(filename) = entry.file_name().to_str() {
-                    if regex.is_match(filename) {
-                        found_files.push(entry.path().display().to_string());
+            let path_str = entry.path().display().to_string();
+            if let Some(name) = entry.file_name().to_str() {
+                let mut matched = false;
+
+                if let Some(ref gm) = glob_matcher {
+                    if gm.is_match(name) || gm.is_match(&path_str) {
+                        matched = true;
                     }
+                }
+
+                if !matched && matcher.fuzzy_match(&name.to_lowercase(), &pattern.to_lowercase()).is_some() {
+                    matched = true;
+                }
+                if !matched && matcher.fuzzy_match(&path_str.to_lowercase(), &pattern.to_lowercase()).is_some() {
+                    matched = true;
+                }
+
+                if matched {
+                    found_files.push(path_str);
                 }
             }
         }
@@ -338,7 +362,8 @@ impl ToolExecutor {
             search_dir.blue()
         );
 
-        let regex = Regex::new(pattern)?;
+        let matcher = SkimMatcherV2::default();
+        let regex = Regex::new(pattern).ok();
         let mut results = Vec::new();
 
         for entry in WalkDir::new(search_dir).follow_links(true) {
@@ -346,7 +371,16 @@ impl ToolExecutor {
             if entry.file_type().is_file() {
                 if let Ok(content) = fs::read_to_string(entry.path()) {
                     for (line_num, line) in content.lines().enumerate() {
-                        if regex.is_match(line) {
+                        let mut matched = false;
+                        if let Some(ref re) = regex {
+                            if re.is_match(line) {
+                                matched = true;
+                            }
+                        }
+                        if !matched && matcher.fuzzy_match(&line.to_lowercase(), &pattern.to_lowercase()).is_some() {
+                            matched = true;
+                        }
+                        if matched {
                             results.push(format!(
                                 "{}:{}: {}",
                                 entry.path().display(),

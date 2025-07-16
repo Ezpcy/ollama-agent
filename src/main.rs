@@ -6,18 +6,24 @@ mod client;
 mod input;
 mod session;
 mod tools;
+mod workspace;
 
 use client::{
     check_ollama_health, delete_model, fetch_models, list_models_filtered, pull_model,
-    select_model, show_model_info,
+    select_model, show_model_info, SelectedModel,
 };
 use session::AssistantSession;
 use tools::{ToolConfig, ToolExecutor};
+use workspace::WorkspaceManager;
+
+mod api_models {
+    pub use crate::client::SelectedModel;
+}
 
 #[derive(Parser)]
-#[command(name = "ollama-agent")]
-#[command(about = "Advanced AI Assistant with System Tools")]
-#[command(version = "0.2.0")]
+#[command(name = "ollama-cli-assistant")]
+#[command(about = "AI-powered coding assistant with system tools")]
+#[command(version = "0.3.0")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -41,11 +47,27 @@ struct Cli {
     /// Enable vim mode for input
     #[arg(long)]
     vim: bool,
+
+    /// Include files in context (similar to Claude CLI)
+    #[arg(long)]
+    files: Vec<String>,
+
+    /// Set working directory
+    #[arg(long)]
+    working_dir: Option<String>,
+
+    /// Stream output (default: true)
+    #[arg(long)]
+    no_stream: bool,
+
+    /// Enable project context scanning
+    #[arg(long)]
+    project_context: bool,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start interactive chat session
+    /// Start interactive chat session (default if no command specified)
     Chat {
         /// Model to use for the session
         #[arg(short, long)]
@@ -54,6 +76,94 @@ enum Commands {
         /// Enable vim mode for input
         #[arg(long)]
         vim: bool,
+
+        /// Include files in context
+        #[arg(long)]
+        files: Vec<String>,
+
+        /// Enable project context
+        #[arg(long)]
+        project_context: bool,
+    },
+    /// Ask a question and get a response (non-interactive)
+    Ask {
+        /// The question to ask
+        prompt: String,
+
+        /// Model to use
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// Include files in context
+        #[arg(long)]
+        files: Vec<String>,
+
+        /// Enable project context
+        #[arg(long)]
+        project_context: bool,
+    },
+    /// Generate code based on description
+    Generate {
+        /// Code description
+        description: String,
+
+        /// Programming language
+        #[arg(short, long)]
+        language: Option<String>,
+
+        /// Output file
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Model to use
+        #[arg(short, long)]
+        model: Option<String>,
+    },
+    /// Edit files interactively
+    Edit {
+        /// Files to edit
+        files: Vec<String>,
+
+        /// Edit instruction
+        #[arg(short, long)]
+        instruction: Option<String>,
+
+        /// Model to use
+        #[arg(short, long)]
+        model: Option<String>,
+    },
+    /// Review code and provide feedback
+    Review {
+        /// Files to review
+        files: Vec<String>,
+
+        /// Review focus (bugs, style, performance, etc.)
+        #[arg(short, long)]
+        focus: Option<String>,
+
+        /// Model to use
+        #[arg(short, long)]
+        model: Option<String>,
+    },
+    /// Commit changes with AI-generated message
+    Commit {
+        /// Additional context for commit message
+        #[arg(short, long)]
+        context: Option<String>,
+
+        /// Model to use
+        #[arg(short, long)]
+        model: Option<String>,
+    },
+    /// Initialize project context
+    Init {
+        /// Project path
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Project type
+        #[arg(short, long)]
+        project_type: Option<String>,
     },
     /// List available models
     List {
@@ -84,6 +194,8 @@ enum Commands {
     Status,
     /// Run system diagnostics
     Diagnostics,
+    /// Discover available tools and system capabilities
+    Discover,
     /// Configuration management
     Config {
         #[command(subcommand)]
@@ -93,6 +205,16 @@ enum Commands {
     Tool {
         #[command(subcommand)]
         tool_command: ToolCommands,
+    },
+    /// Manage conversation history
+    History {
+        #[command(subcommand)]
+        history_command: HistoryCommands,
+    },
+    /// Manage workspace and project context
+    Workspace {
+        #[command(subcommand)]
+        workspace_command: WorkspaceCommands,
     },
 }
 
@@ -114,6 +236,86 @@ enum ConfigCommands {
         /// Output file path
         path: String,
     },
+}
+
+#[derive(Subcommand)]
+enum HistoryCommands {
+    /// Show conversation history
+    Show {
+        /// Number of recent entries to show
+        #[arg(short, long, default_value = "10")]
+        count: usize,
+        
+        /// Show detailed information
+        #[arg(short, long)]
+        detailed: bool,
+    },
+    /// Clear conversation history
+    Clear {
+        /// Clear all history
+        #[arg(short, long)]
+        all: bool,
+    },
+    /// Export conversation history
+    Export {
+        /// Output file path
+        path: String,
+        
+        /// Export format (json, markdown, text)
+        #[arg(short, long, default_value = "json")]
+        format: String,
+    },
+    /// Search conversation history
+    Search {
+        /// Search query
+        query: String,
+        
+        /// Maximum results
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkspaceCommands {
+    /// Initialize workspace
+    Init {
+        /// Workspace path
+        path: Option<String>,
+        
+        /// Project type
+        #[arg(short, long)]
+        project_type: Option<String>,
+    },
+    /// Show workspace info
+    Info,
+    /// Scan project for context
+    Scan {
+        /// Path to scan
+        path: Option<String>,
+        
+        /// Include hidden files
+        #[arg(long)]
+        include_hidden: bool,
+    },
+    /// Add files to workspace context
+    Add {
+        /// Files to add
+        files: Vec<String>,
+    },
+    /// Remove files from workspace context
+    Remove {
+        /// Files to remove
+        files: Vec<String>,
+    },
+    /// List workspace context
+    List {
+        /// Show detailed information
+        #[arg(short, long)]
+        detailed: bool,
+    },
+    /// Clear workspace context
+    Clear,
 }
 
 #[derive(Subcommand)]
@@ -270,6 +472,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env_logger::init();
     }
 
+    // Change working directory if specified
+    if let Some(working_dir) = cli.working_dir {
+        std::env::set_current_dir(&working_dir)?;
+    }
+
     // Check if Ollama is running
     if !check_ollama_health().await? {
         eprintln!("{} Failed to connect to Ollama", "❌".red());
@@ -281,8 +488,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     match cli.command {
-        Some(Commands::Chat { model, vim }) => {
-            start_chat_session(model, cli.config, vim).await?;
+        Some(Commands::Chat { model, vim, files, project_context }) => {
+            start_chat_session_with_context(model, cli.config, vim, files, project_context).await?;
+        }
+        Some(Commands::Ask { prompt, model, files, project_context }) => {
+            handle_ask_command(prompt, model, files, project_context).await?;
+        }
+        Some(Commands::Generate { description, language, output, model }) => {
+            handle_generate_command(description, language, output, model).await?;
+        }
+        Some(Commands::Edit { files, instruction, model }) => {
+            handle_edit_command(files, instruction, model).await?;
+        }
+        Some(Commands::Review { files, focus, model }) => {
+            handle_review_command(files, focus, model).await?;
+        }
+        Some(Commands::Commit { context, model }) => {
+            handle_commit_command(context, model).await?;
+        }
+        Some(Commands::Init { path, project_type }) => {
+            handle_init_command(path, project_type).await?;
         }
         Some(Commands::List { filter, detailed }) => {
             list_models_command(filter, detailed).await?;
@@ -302,20 +527,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Diagnostics) => {
             run_diagnostics().await?;
         }
+        Some(Commands::Discover) => {
+            run_tool_discovery().await?;
+        }
         Some(Commands::Config { config_command }) => {
             handle_config_command(config_command).await?;
         }
         Some(Commands::Tool { tool_command }) => {
             handle_tool_command(tool_command).await?;
         }
+        Some(Commands::History { history_command }) => {
+            handle_history_command(history_command).await?;
+        }
+        Some(Commands::Workspace { workspace_command }) => {
+            handle_workspace_command(workspace_command).await?;
+        }
         None => {
             // No subcommand provided
             if let Some(command) = cli.execute {
-                // Execute single command
-                execute_single_command(&command, cli.model, cli.vim).await?;
+                // Execute single command with context
+                execute_single_command_with_context(&command, cli.model, cli.vim, cli.files, cli.project_context).await?;
             } else {
-                // Default to interactive chat
-                start_chat_session(cli.model, cli.config, cli.vim).await?;
+                // Default to interactive chat with context
+                start_chat_session_with_context(cli.model, cli.config, cli.vim, cli.files, cli.project_context).await?;
             }
         }
     }
@@ -549,6 +783,18 @@ async fn test_package_managers() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_system_commands() -> Result<(), Box<dyn std::error::Error>> {
     let executor = ToolExecutor::new();
     executor.execute_command("echo test").await?;
+    Ok(())
+}
+
+async fn run_tool_discovery() -> Result<(), Box<dyn std::error::Error>> {
+    println!("{}", "🔍 Discovering Available Tools...".cyan().bold());
+    println!();
+    
+    let mut discovery = tools::discovery::ToolDiscovery::new();
+    let results = discovery.discover_tools().await;
+    
+    discovery.display_discovery_results(&results);
+    
     Ok(())
 }
 
@@ -790,6 +1036,533 @@ async fn execute_single_command(
     // Create session and execute command
     let tool_executor = ToolExecutor::new();
     let mut session = AssistantSession::with_vim_mode(selected_model, tool_executor, vim_mode);
+
+    session.process_single_command(command).await?;
+
+    Ok(())
+}
+
+// New Claude CLI-like handlers
+async fn start_chat_session_with_context(
+    model_name: Option<String>,
+    _config_path: Option<String>,
+    vim_mode: bool,
+    files: Vec<String>,
+    project_context: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut workspace_manager = WorkspaceManager::new();
+    
+    // Load existing workspace context if available
+    if let Err(_) = workspace_manager.load_context() {
+        // If no context exists and project_context is requested, create one
+        if project_context {
+            workspace_manager.init_workspace(None, None)?;
+            workspace_manager.get_context_mut().unwrap().scan_project(false)?;
+        }
+    }
+
+    // Add specified files to context
+    if !files.is_empty() {
+        if let Some(context) = workspace_manager.get_context_mut() {
+            context.add_files(&files)?;
+        } else {
+            // Create a minimal context just for the files
+            workspace_manager.init_workspace(None, None)?;
+            workspace_manager.get_context_mut().unwrap().add_files(&files)?;
+        }
+        workspace_manager.save_context()?;
+    }
+
+    // Get selected model
+    let selected_model = if let Some(model) = model_name {
+        // Try to find the specified model
+        let available_models = fetch_models().await?;
+        let matching_models: Vec<_> = available_models
+            .iter()
+            .filter(|m| m.name.to_lowercase().contains(&model.to_lowercase()))
+            .collect();
+        
+        if matching_models.is_empty() {
+            return Err(format!("Model '{}' not found", model).into());
+        } else if matching_models.len() == 1 {
+            SelectedModel::from(matching_models[0].clone())
+        } else {
+            return Err(format!("Multiple models match '{}', please be more specific", model).into());
+        }
+    } else {
+        let available_models = fetch_models().await?;
+        select_model(&available_models)?
+    };
+
+    // Create session
+    let tool_executor = ToolExecutor::new();
+    let mut session = AssistantSession::with_vim_mode(selected_model, tool_executor, vim_mode);
+
+    // Add workspace context to session if available
+    if let Some(context) = workspace_manager.get_context() {
+        let file_contents = context.get_file_contents()?;
+        session.add_workspace_context(context, file_contents)?;
+    }
+
+    // Start interactive session
+    session.run().await?;
+
+    Ok(())
+}
+
+async fn handle_ask_command(
+    prompt: String,
+    model_name: Option<String>,
+    files: Vec<String>,
+    project_context: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut workspace_manager = WorkspaceManager::new();
+    
+    // Load workspace context if requested
+    if project_context {
+        if let Err(_) = workspace_manager.load_context() {
+            workspace_manager.init_workspace(None, None)?;
+            workspace_manager.get_context_mut().unwrap().scan_project(false)?;
+        }
+    }
+
+    // Add specified files to context
+    if !files.is_empty() {
+        if workspace_manager.get_context().is_none() {
+            workspace_manager.init_workspace(None, None)?;
+        }
+        workspace_manager.get_context_mut().unwrap().add_files(&files)?;
+    }
+
+    // Get selected model
+    let selected_model = if let Some(model) = model_name {
+        // Try to find the specified model
+        let available_models = fetch_models().await?;
+        let matching_models: Vec<_> = available_models
+            .iter()
+            .filter(|m| m.name.to_lowercase().contains(&model.to_lowercase()))
+            .collect();
+        
+        if matching_models.is_empty() {
+            return Err(format!("Model '{}' not found", model).into());
+        } else if matching_models.len() == 1 {
+            SelectedModel::from(matching_models[0].clone())
+        } else {
+            return Err(format!("Multiple models match '{}', please be more specific", model).into());
+        }
+    } else {
+        let available_models = fetch_models().await?;
+        select_model(&available_models)?
+    };
+
+    // Create session
+    let tool_executor = ToolExecutor::new();
+    let mut session = AssistantSession::new(selected_model, tool_executor);
+
+    // Add workspace context to session if available
+    if let Some(context) = workspace_manager.get_context() {
+        let file_contents = context.get_file_contents()?;
+        session.add_workspace_context(context, file_contents)?;
+    }
+
+    // Process the prompt
+    session.process_single_command(&prompt).await?;
+
+    Ok(())
+}
+
+async fn handle_generate_command(
+    description: String,
+    language: Option<String>,
+    output: Option<String>,
+    model_name: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let selected_model = if let Some(model) = model_name {
+        // Try to find the specified model
+        let available_models = fetch_models().await?;
+        let matching_models: Vec<_> = available_models
+            .iter()
+            .filter(|m| m.name.to_lowercase().contains(&model.to_lowercase()))
+            .collect();
+        
+        if matching_models.is_empty() {
+            return Err(format!("Model '{}' not found", model).into());
+        } else if matching_models.len() == 1 {
+            SelectedModel::from(matching_models[0].clone())
+        } else {
+            return Err(format!("Multiple models match '{}', please be more specific", model).into());
+        }
+    } else {
+        let available_models = fetch_models().await?;
+        select_model(&available_models)?
+    };
+
+    let tool_executor = ToolExecutor::new();
+    let mut session = AssistantSession::new(selected_model, tool_executor);
+
+    // Construct the generation prompt
+    let mut prompt = format!("Generate code based on this description: {}", description);
+    
+    if let Some(lang) = language {
+        prompt.push_str(&format!(" Use {} programming language.", lang));
+    }
+    
+    if let Some(out) = output {
+        prompt.push_str(&format!(" Save the code to file: {}", out));
+    }
+
+    session.process_single_command(&prompt).await?;
+
+    Ok(())
+}
+
+async fn handle_edit_command(
+    files: Vec<String>,
+    instruction: Option<String>,
+    model_name: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if files.is_empty() {
+        eprintln!("{} No files specified for editing", "❌".red());
+        return Ok(());
+    }
+
+    let selected_model = if let Some(model) = model_name {
+        // Try to find the specified model
+        let available_models = fetch_models().await?;
+        let matching_models: Vec<_> = available_models
+            .iter()
+            .filter(|m| m.name.to_lowercase().contains(&model.to_lowercase()))
+            .collect();
+        
+        if matching_models.is_empty() {
+            return Err(format!("Model '{}' not found", model).into());
+        } else if matching_models.len() == 1 {
+            SelectedModel::from(matching_models[0].clone())
+        } else {
+            return Err(format!("Multiple models match '{}', please be more specific", model).into());
+        }
+    } else {
+        let available_models = fetch_models().await?;
+        select_model(&available_models)?
+    };
+
+    let tool_executor = ToolExecutor::new();
+    let mut session = AssistantSession::new(selected_model, tool_executor);
+
+    // Load file contents
+    let mut file_contents = std::collections::HashMap::new();
+    for file in &files {
+        if let Ok(content) = std::fs::read_to_string(file) {
+            file_contents.insert(file.clone(), content);
+        }
+    }
+
+    // Construct the editing prompt
+    let mut prompt = String::new();
+    if let Some(instr) = instruction {
+        prompt.push_str(&format!("Edit the following files according to this instruction: {}\n\n", instr));
+    } else {
+        prompt.push_str("Edit the following files:\n\n");
+    }
+
+    for (file, content) in file_contents {
+        prompt.push_str(&format!("File: {}\n```\n{}\n```\n\n", file, content));
+    }
+
+    session.process_single_command(&prompt).await?;
+
+    Ok(())
+}
+
+async fn handle_review_command(
+    files: Vec<String>,
+    focus: Option<String>,
+    model_name: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if files.is_empty() {
+        eprintln!("{} No files specified for review", "❌".red());
+        return Ok(());
+    }
+
+    let selected_model = if let Some(model) = model_name {
+        // Try to find the specified model
+        let available_models = fetch_models().await?;
+        let matching_models: Vec<_> = available_models
+            .iter()
+            .filter(|m| m.name.to_lowercase().contains(&model.to_lowercase()))
+            .collect();
+        
+        if matching_models.is_empty() {
+            return Err(format!("Model '{}' not found", model).into());
+        } else if matching_models.len() == 1 {
+            SelectedModel::from(matching_models[0].clone())
+        } else {
+            return Err(format!("Multiple models match '{}', please be more specific", model).into());
+        }
+    } else {
+        let available_models = fetch_models().await?;
+        select_model(&available_models)?
+    };
+
+    let tool_executor = ToolExecutor::new();
+    let mut session = AssistantSession::new(selected_model, tool_executor);
+
+    // Load file contents
+    let mut file_contents = std::collections::HashMap::new();
+    for file in &files {
+        if let Ok(content) = std::fs::read_to_string(file) {
+            file_contents.insert(file.clone(), content);
+        }
+    }
+
+    // Construct the review prompt
+    let mut prompt = String::new();
+    if let Some(focus_area) = focus {
+        prompt.push_str(&format!("Review the following files focusing on: {}\n\n", focus_area));
+    } else {
+        prompt.push_str("Review the following files for code quality, bugs, and improvements:\n\n");
+    }
+
+    for (file, content) in file_contents {
+        prompt.push_str(&format!("File: {}\n```\n{}\n```\n\n", file, content));
+    }
+
+    session.process_single_command(&prompt).await?;
+
+    Ok(())
+}
+
+async fn handle_commit_command(
+    context: Option<String>,
+    model_name: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let selected_model = if let Some(model) = model_name {
+        // Try to find the specified model
+        let available_models = fetch_models().await?;
+        let matching_models: Vec<_> = available_models
+            .iter()
+            .filter(|m| m.name.to_lowercase().contains(&model.to_lowercase()))
+            .collect();
+        
+        if matching_models.is_empty() {
+            return Err(format!("Model '{}' not found", model).into());
+        } else if matching_models.len() == 1 {
+            SelectedModel::from(matching_models[0].clone())
+        } else {
+            return Err(format!("Multiple models match '{}', please be more specific", model).into());
+        }
+    } else {
+        let available_models = fetch_models().await?;
+        select_model(&available_models)?
+    };
+
+    let tool_executor = ToolExecutor::new();
+    let mut session = AssistantSession::new(selected_model, tool_executor);
+
+    // Get git diff
+    let git_tool_executor = ToolExecutor::new();
+    let diff_result = git_tool_executor.git_diff(None, false, None).await?;
+    if !diff_result.success {
+        eprintln!("{} Failed to get git diff", "❌".red());
+        return Ok(());
+    }
+
+    // Construct commit message generation prompt
+    let mut prompt = "Generate a concise and descriptive commit message based on the following git diff:\n\n".to_string();
+    prompt.push_str(&diff_result.output);
+    
+    if let Some(ctx) = context {
+        prompt.push_str(&format!("\n\nAdditional context: {}", ctx));
+    }
+
+    session.process_single_command(&prompt).await?;
+
+    Ok(())
+}
+
+async fn handle_init_command(
+    path: Option<String>,
+    project_type: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut workspace_manager = WorkspaceManager::new();
+    
+    workspace_manager.init_workspace(path, project_type)?;
+    
+    if let Some(context) = workspace_manager.get_context_mut() {
+        context.scan_project(false)?;
+        workspace_manager.save_context()?;
+    }
+    
+    Ok(())
+}
+
+async fn handle_history_command(
+    command: HistoryCommands,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut history_manager = tools::history::HistoryManager::new();
+    
+    match command {
+        HistoryCommands::Show { count, detailed } => {
+            let entries = history_manager.get_recent(count);
+            history_manager.show_entries(&entries, detailed);
+        }
+        HistoryCommands::Clear { all: _ } => {
+            history_manager.clear();
+            println!("{} Conversation history cleared", "🧹".cyan());
+        }
+        HistoryCommands::Export { path, format } => {
+            history_manager.export(&path, &format)?;
+            println!("{} Conversation history exported to: {} (format: {})", "📤".cyan(), path, format);
+        }
+        HistoryCommands::Search { query, limit } => {
+            let entries = history_manager.search(&query, limit);
+            println!("{} Search results for '{}':", "🔍".cyan(), query);
+            history_manager.show_entries(&entries, true);
+        }
+    }
+    
+    Ok(())
+}
+
+async fn handle_workspace_command(
+    command: WorkspaceCommands,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut workspace_manager = WorkspaceManager::new();
+    
+    match command {
+        WorkspaceCommands::Init { path, project_type } => {
+            workspace_manager.init_workspace(path, project_type)?;
+            if let Some(context) = workspace_manager.get_context_mut() {
+                context.scan_project(false)?;
+            }
+            workspace_manager.save_context()?;
+        }
+        WorkspaceCommands::Info => {
+            workspace_manager.load_context()?;
+            if let Some(context) = workspace_manager.get_context() {
+                println!("{} Workspace Information", "📁".cyan());
+                println!("Root path: {}", context.root_path.display());
+                println!("Project type: {}", context.project_type.as_deref().unwrap_or("unknown"));
+                println!("Files in context: {}", context.included_files.len());
+                println!("Created: {}", context.created_at);
+                println!("Last updated: {}", context.last_updated);
+            } else {
+                println!("{} No workspace context found", "❌".red());
+            }
+        }
+        WorkspaceCommands::Scan { path, include_hidden } => {
+            if workspace_manager.get_context().is_none() {
+                workspace_manager.init_workspace(path, None)?;
+            }
+            if let Some(context) = workspace_manager.get_context_mut() {
+                context.scan_project(include_hidden)?;
+                workspace_manager.save_context()?;
+            }
+        }
+        WorkspaceCommands::Add { files } => {
+            workspace_manager.load_context()?;
+            if let Some(context) = workspace_manager.get_context_mut() {
+                context.add_files(&files)?;
+                workspace_manager.save_context()?;
+                println!("{} Added {} files to workspace context", "✅".green(), files.len());
+            } else {
+                println!("{} No workspace context found. Run 'init' first.", "❌".red());
+            }
+        }
+        WorkspaceCommands::Remove { files } => {
+            workspace_manager.load_context()?;
+            if let Some(context) = workspace_manager.get_context_mut() {
+                context.remove_files(&files)?;
+                workspace_manager.save_context()?;
+                println!("{} Removed {} files from workspace context", "✅".green(), files.len());
+            } else {
+                println!("{} No workspace context found", "❌".red());
+            }
+        }
+        WorkspaceCommands::List { detailed } => {
+            workspace_manager.load_context()?;
+            if let Some(context) = workspace_manager.get_context() {
+                println!("{} Workspace files ({})", "📁".cyan(), context.included_files.len());
+                for file in &context.included_files {
+                    if detailed {
+                        let full_path = context.root_path.join(file);
+                        if let Ok(metadata) = std::fs::metadata(&full_path) {
+                            println!("  {} ({} bytes)", file.display(), metadata.len());
+                        } else {
+                            println!("  {} (not found)", file.display());
+                        }
+                    } else {
+                        println!("  {}", file.display());
+                    }
+                }
+            } else {
+                println!("{} No workspace context found", "❌".red());
+            }
+        }
+        WorkspaceCommands::Clear => {
+            workspace_manager.clear_context()?;
+            println!("{} Workspace context cleared", "🧹".cyan());
+        }
+    }
+    
+    Ok(())
+}
+
+async fn execute_single_command_with_context(
+    command: &str,
+    model_name: Option<String>,
+    vim_mode: bool,
+    files: Vec<String>,
+    project_context: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut workspace_manager = WorkspaceManager::new();
+    
+    // Load workspace context if requested
+    if project_context {
+        if let Err(_) = workspace_manager.load_context() {
+            workspace_manager.init_workspace(None, None)?;
+            workspace_manager.get_context_mut().unwrap().scan_project(false)?;
+        }
+    }
+
+    // Add specified files to context
+    if !files.is_empty() {
+        if workspace_manager.get_context().is_none() {
+            workspace_manager.init_workspace(None, None)?;
+        }
+        workspace_manager.get_context_mut().unwrap().add_files(&files)?;
+    }
+
+    // Get selected model
+    let selected_model = if let Some(model) = model_name {
+        // Try to find the specified model
+        let available_models = fetch_models().await?;
+        let matching_models: Vec<_> = available_models
+            .iter()
+            .filter(|m| m.name.to_lowercase().contains(&model.to_lowercase()))
+            .collect();
+        
+        if matching_models.is_empty() {
+            return Err(format!("Model '{}' not found", model).into());
+        } else if matching_models.len() == 1 {
+            SelectedModel::from(matching_models[0].clone())
+        } else {
+            return Err(format!("Multiple models match '{}', please be more specific", model).into());
+        }
+    } else {
+        let available_models = fetch_models().await?;
+        select_model(&available_models)?
+    };
+
+    // Create session
+    let tool_executor = ToolExecutor::new();
+    let mut session = AssistantSession::with_vim_mode(selected_model, tool_executor, vim_mode);
+
+    // Add workspace context to session if available
+    if let Some(context) = workspace_manager.get_context() {
+        let file_contents = context.get_file_contents()?;
+        session.add_workspace_context(context, file_contents)?;
+    }
 
     session.process_single_command(command).await?;
 

@@ -7,6 +7,9 @@ use crate::tools::{
     AvailableTool, ConversationEntry, NaturalLanguageParser, PermissionManager,
     ToolExecutor, AsyncToolExecutor, ResourceLimits,
 };
+use crate::workspace::WorkspaceContext;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub struct AssistantSession {
     model: SelectedModel,
@@ -17,6 +20,8 @@ pub struct AssistantSession {
     conversation_history: Vec<ConversationEntry>,
     session_stats: SessionStats,
     vim_handler: VimInputHandler,
+    workspace_context: Option<WorkspaceContext>,
+    workspace_files: HashMap<PathBuf, String>,
 }
 
 #[derive(Debug, Default)]
@@ -44,6 +49,8 @@ impl AssistantSession {
             conversation_history: Vec::new(),
             session_stats: SessionStats::default(),
             vim_handler: VimInputHandler::new(),
+            workspace_context: None,
+            workspace_files: HashMap::new(),
         }
     }
 
@@ -276,17 +283,27 @@ impl AssistantSession {
         let start_time = Instant::now();
         self.session_stats.commands_processed += 1;
 
-        // Use LLM to analyze and determine tools
-        println!("{} Analyzing request with AI...", "🧠".cyan());
-        let tools = self
-            .parser
-            .parse_request_with_llm(user_input, &self.model)
-            .await;
+        // Create context-aware prompt
+        let context_prompt = self.create_context_aware_prompt(user_input);
 
-        if tools.is_empty() {
-            self.handle_general_conversation(user_input).await?;
+        // Check if command generation is enabled and if this might be a command request
+        let is_command_generation_enabled = self.tool_executor.is_command_generation_enabled().await.unwrap_or(false);
+        
+        if is_command_generation_enabled && self.should_generate_command(user_input) {
+            self.handle_command_generation_request(user_input).await?;
         } else {
-            self.handle_tool_request(user_input, tools).await?;
+            // Use LLM to analyze and determine tools
+            println!("{} Analyzing request with AI...", "🧠".cyan());
+            let tools = self
+                .parser
+                .parse_request_with_llm(&context_prompt, &self.model)
+                .await;
+
+            if tools.is_empty() {
+                self.handle_general_conversation(&context_prompt).await?;
+            } else {
+                self.handle_tool_request(&context_prompt, tools).await?;
+            }
         }
 
         let duration = start_time.elapsed();
@@ -425,7 +442,16 @@ impl AssistantSession {
     fn build_conversation_context(&self, user_input: &str) -> String {
         let mut context = String::new();
 
-        // Add model configuration context
+        // Add system prompt from config if available
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            if let Ok(system_prompt) = handle.block_on(async { self.tool_executor.get_system_prompt().await }) {
+                if let Some(prompt) = system_prompt {
+                    context.push_str(&format!("System: {}\n\n", prompt));
+                }
+            }
+        }
+
+        // Add model configuration context as fallback
         let model_config = crate::tools::model_config::get_current_model_config();
         if !model_config.system_prompt.is_empty()
             && model_config.system_prompt != "You are a helpful AI assistant."
@@ -712,5 +738,185 @@ impl AssistantSession {
             .set_model_parameter(parameter, value)
             .await?;
         Ok(())
+    }
+
+    // Add workspace context to session
+    pub fn add_workspace_context(
+        &mut self,
+        context: &WorkspaceContext,
+        files: HashMap<PathBuf, String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.workspace_context = Some(context.clone());
+        self.workspace_files = files;
+        
+        println!("{} Added workspace context: {} files", "📁".cyan(), self.workspace_files.len());
+        Ok(())
+    }
+
+    // Get workspace context
+    pub fn get_workspace_context(&self) -> Option<&WorkspaceContext> {
+        self.workspace_context.as_ref()
+    }
+
+    // Get workspace files
+    pub fn get_workspace_files(&self) -> &HashMap<PathBuf, String> {
+        &self.workspace_files
+    }
+
+    // Create context-aware prompt
+    fn should_generate_command(&self, user_input: &str) -> bool {
+        // Check for command generation keywords
+        let command_keywords = [
+            "initialize", "create", "run", "execute", "find", "search", "install",
+            "build", "compile", "test", "deploy", "start", "stop", "restart",
+            "setup", "configure", "clone", "pull", "push", "commit", "branch",
+            "list", "show", "display", "check", "verify", "download", "upload",
+            "generate", "make", "remove", "delete", "move", "copy", "rename",
+            "git", "npm", "cargo", "pip", "docker", "grep", "find", "ls", "cd",
+            "mkdir", "rmdir", "touch", "vim", "nano", "cat", "head", "tail",
+            "curl", "wget", "ssh", "scp", "rsync", "chmod", "chown", "ps", "kill",
+            "systemctl", "service", "crontab", "tar", "zip", "unzip", "gzip"
+        ];
+        
+        let input_lower = user_input.to_lowercase();
+        
+        // Check for direct command keywords
+        if command_keywords.iter().any(|&keyword| input_lower.contains(keyword)) {
+            return true;
+        }
+        
+        // Check for project initialization patterns
+        if input_lower.contains("project") && 
+           (input_lower.contains("new") || input_lower.contains("create") || input_lower.contains("init")) {
+            return true;
+        }
+        
+        // Check for file/directory operations
+        if (input_lower.contains("file") || input_lower.contains("directory") || input_lower.contains("folder"))
+           && (input_lower.contains("find") || input_lower.contains("search") || input_lower.contains("list")) {
+            return true;
+        }
+        
+        // Check for system administration patterns
+        if input_lower.contains("system") || input_lower.contains("process") || input_lower.contains("service") {
+            return true;
+        }
+        
+        false
+    }
+
+    async fn handle_command_generation_request(&mut self, user_input: &str) -> Result<(), Box<dyn std::error::Error>> {
+        println!("{} Generating command for your request...", "🤖".cyan());
+        
+        // Get workspace context as additional context
+        let context = if let Some(workspace_context) = &self.workspace_context {
+            Some(format!(
+                "Project: {} ({})", 
+                workspace_context.root_path.display(),
+                workspace_context.project_type.as_deref().unwrap_or("unknown")
+            ))
+        } else {
+            None
+        };
+
+        // Generate command using the tool executor
+        let generation_result = self.tool_executor.generate_command(user_input, context.as_deref()).await?;
+        
+        if !generation_result.success {
+            println!("{} Failed to generate command: {}", "❌".red(), generation_result.error.unwrap_or("Unknown error".to_string()));
+            return Ok(());
+        }
+
+        // Use the generated prompt to get a command from the LLM
+        let command_prompt = generation_result.output;
+        let generated_command = stream_response(&self.model, &command_prompt).await?;
+        
+        // Clean up the response to get just the command
+        let clean_command = generated_command.trim()
+            .lines()
+            .find(|line| !line.trim().is_empty() && !line.starts_with("Command:"))
+            .unwrap_or(generated_command.trim())
+            .trim();
+
+        println!("{} Generated command: {}", "💡".yellow(), clean_command.cyan());
+        
+        // Ask user if they want to execute it
+        use dialoguer::{Confirm, theme::ColorfulTheme};
+        let should_execute = Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt(format!("{} Execute this command?", "🚀".green()))
+            .default(false)
+            .interact()?;
+        
+        if should_execute {
+            // Execute the command
+            let tool = AvailableTool::ExecuteCommand {
+                command: clean_command.to_string(),
+            };
+            
+            if self.permission_manager.request_permission(&tool)? {
+                println!("{} Executing command...", "⚡".cyan());
+                let result = self.tool_executor.execute_tool(tool).await?;
+                
+                if result.success {
+                    println!("{} Command executed successfully!", "✅".green());
+                    if !result.output.is_empty() {
+                        println!("{}", result.output);
+                    }
+                } else {
+                    println!("{} Command failed: {}", "❌".red(), result.error.unwrap_or("Unknown error".to_string()));
+                }
+            } else {
+                println!("{} Command execution denied", "🚫".red());
+            }
+        } else {
+            println!("{} Command execution cancelled", "🚫".yellow());
+        }
+        
+        // Create conversation entry
+        let entry = ConversationEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            user_input: user_input.to_string(),
+            assistant_response: format!("Generated command: {}", clean_command),
+            tools_used: vec!["command_generation".to_string()],
+            metadata: Some(serde_json::json!({
+                "generated_command": clean_command,
+                "executed": should_execute
+            })),
+        };
+        
+        self.conversation_history.push(entry);
+        
+        Ok(())
+    }
+
+    pub fn create_context_aware_prompt(&self, user_input: &str) -> String {
+        let mut prompt = String::new();
+        
+        // Add workspace context if available
+        if let Some(context) = &self.workspace_context {
+            prompt.push_str(&format!("Project context:\n"));
+            prompt.push_str(&format!("- Root path: {}\n", context.root_path.display()));
+            if let Some(project_type) = &context.project_type {
+                prompt.push_str(&format!("- Project type: {}\n", project_type));
+            }
+            prompt.push_str(&format!("- Files in context: {}\n\n", context.included_files.len()));
+            
+            // Add file contents if not too many
+            if self.workspace_files.len() <= 10 {
+                prompt.push_str("Relevant files:\n");
+                for (path, content) in &self.workspace_files {
+                    prompt.push_str(&format!("\n## {}\n```\n{}\n```\n", path.display(), content));
+                }
+            } else {
+                prompt.push_str(&format!("Note: {} files are available in the workspace context.\n", self.workspace_files.len()));
+            }
+            
+            prompt.push_str("\n---\n\n");
+        }
+        
+        // Add user input
+        prompt.push_str(&format!("User request: {}", user_input));
+        
+        prompt
     }
 }

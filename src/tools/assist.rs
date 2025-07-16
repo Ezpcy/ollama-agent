@@ -64,7 +64,7 @@ impl AssistantSession {
         println!("{}", "I can help you with:".blue());
         println!("  {} Web searches and scraping", "•".blue());
         println!("  {} File operations (read, write, search)", "•".blue());
-        println!("  {} Project creation (Rust, Python, JS)", "•".blue());
+        println!("  {} Project analysis and management (Rust, Python, JS, Go, Java, and more)", "•".blue());
         println!("  {} System commands (with permission)", "•".blue());
         println!("  {} And anything else you can think of!", "•".blue());
         println!();

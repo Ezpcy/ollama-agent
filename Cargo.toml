@@ -53,6 +53,9 @@ anyhow = "1.0"
 # Random number generation for jitter
 rand = "0.8"
 
+# UUID generation for error IDs
+uuid = { version = "1.0", features = ["v4"] }
+
 # Optional features for enhanced functionality
 # Uncomment these for full database support
 # sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "mysql", "sqlite"] }

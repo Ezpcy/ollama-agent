@@ -56,6 +56,10 @@ pub enum AvailableTool {
     ExecuteCommand {
         command: String,
     },
+    GenerateCommand {
+        user_request: String,
+        context: Option<String>,
+    },
     ListDirectory {
         path: String,
     },
@@ -443,6 +447,9 @@ impl ToolExecutor {
                 path,
             } => self.create_project(&name, &project_type, path.as_deref()),
             AvailableTool::ExecuteCommand { command } => self.execute_command(&command).await,
+            AvailableTool::GenerateCommand { user_request, context } => {
+                self.generate_command(&user_request, context.as_deref()).await
+            },
             AvailableTool::ListDirectory { path } => self.list_directory(&path),
 
             // New tools

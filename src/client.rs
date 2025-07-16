@@ -28,16 +28,13 @@ pub struct Model {
 pub struct ModelDetails {
     pub format: Option<String>,
     pub family: Option<String>,
-    pub families: Option<Vec<String>>,
     pub parameter_size: Option<String>,
-    pub quantization_level: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SelectedModel {
     pub name: String,
     pub size_gb: f64,
-    pub digest: String,
     pub modified_at: String,
     pub details: Option<ModelDetails>,
 }
@@ -47,7 +44,6 @@ impl From<Model> for SelectedModel {
         SelectedModel {
             name: model.name,
             size_gb: model.size as f64 / 1_000_000_000.0,
-            digest: model.digest,
             modified_at: model.modified_at,
             details: model.details,
         }
@@ -86,11 +82,6 @@ impl SelectedModel {
             || self.name.to_lowercase().contains("starcoder")
     }
 
-    pub fn is_chat_model(&self) -> bool {
-        self.name.to_lowercase().contains("chat")
-            || self.name.to_lowercase().contains("instruct")
-            || !self.is_code_model()
-    }
 }
 
 #[derive(Serialize, Debug)]
@@ -124,12 +115,6 @@ pub struct OllamaResponse {
     pub done: bool,
     #[serde(default)]
     pub total_duration: Option<u64>,
-    #[serde(default)]
-    pub load_duration: Option<u64>,
-    #[serde(default)]
-    pub prompt_eval_count: Option<u32>,
-    #[serde(default)]
-    pub prompt_eval_duration: Option<u64>,
     #[serde(default)]
     pub eval_count: Option<u32>,
     #[serde(default)]
@@ -295,32 +280,6 @@ pub async fn stream_response(
     Ok(full_response)
 }
 
-// Non-streaming version for tool usage
-pub async fn generate_response(
-    model: &SelectedModel,
-    prompt: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let client = Client::new();
-
-    let request = crate::tools::model_config::create_enhanced_request(
-        model.get_name(),
-        prompt,
-        false, // Non-streaming
-    );
-
-    let response = client
-        .post("http://localhost:11434/api/generate")
-        .json(&request)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        return Err(format!("API request failed: {}", response.status()).into());
-    }
-
-    let ollama_response: OllamaResponse = response.json().await?;
-    Ok(ollama_response.response.unwrap_or_default())
-}
 
 #[derive(Debug)]
 struct ResponseStats {

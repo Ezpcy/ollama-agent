@@ -18,6 +18,8 @@ pub struct AppConfig {
     pub log_level: String,
     pub backup_enabled: bool,
     pub custom_commands: HashMap<String, String>,
+    pub system_prompt: Option<String>,
+    pub enable_command_generation: bool,
 }
 
 impl Default for AppConfig {
@@ -34,6 +36,8 @@ impl Default for AppConfig {
             log_level: "info".to_string(),
             backup_enabled: true,
             custom_commands: HashMap::new(),
+            system_prompt: None,
+            enable_command_generation: true,
         }
     }
 }
@@ -171,6 +175,32 @@ impl ToolExecutor {
                     });
                 }
             }
+            "system_prompt" => {
+                if let Some(val) = value.as_str() {
+                    config.system_prompt = Some(val.to_string());
+                } else if value.is_null() {
+                    config.system_prompt = None;
+                } else {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some("system_prompt must be a string or null".to_string()),
+                        metadata: None,
+                    });
+                }
+            }
+            "enable_command_generation" => {
+                if let Some(val) = value.as_bool() {
+                    config.enable_command_generation = val;
+                } else {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some("enable_command_generation must be a boolean".to_string()),
+                        metadata: None,
+                    });
+                }
+            }
             _ => {
                 return Ok(ToolResult {
                     success: false,
@@ -210,6 +240,8 @@ impl ToolExecutor {
             Some("editor") => format!("editor: {}", config.editor),
             Some("log_level") => format!("log_level: {}", config.log_level),
             Some("backup_enabled") => format!("backup_enabled: {}", config.backup_enabled),
+            Some("system_prompt") => format!("system_prompt: {}", config.system_prompt.as_deref().unwrap_or("None")),
+            Some("enable_command_generation") => format!("enable_command_generation: {}", config.enable_command_generation),
             Some(unknown_key) => {
                 return Ok(ToolResult {
                     success: false,
@@ -229,6 +261,8 @@ impl ToolExecutor {
                     editor: {}\n\
                     log_level: {}\n\
                     backup_enabled: {}\n\
+                    system_prompt: {}\n\
+                    enable_command_generation: {}\n\
                     database_connections: {} configured\n\
                     api_keys: {} configured\n\
                     custom_commands: {} configured",
@@ -240,6 +274,8 @@ impl ToolExecutor {
                     config.editor,
                     config.log_level,
                     config.backup_enabled,
+                    config.system_prompt.as_deref().unwrap_or("None"),
+                    config.enable_command_generation,
                     config.database_connections.len(),
                     config.api_keys.len(),
                     config.custom_commands.len()
@@ -616,6 +652,16 @@ impl ToolExecutor {
         }
 
         output.join("\n")
+    }
+
+    pub async fn get_system_prompt(&self) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        let config = self.load_config().await.unwrap_or_default();
+        Ok(config.system_prompt)
+    }
+
+    pub async fn is_command_generation_enabled(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        let config = self.load_config().await.unwrap_or_default();
+        Ok(config.enable_command_generation)
     }
 
     fn conversation_to_html(&self, conversation: &[ConversationEntry]) -> String {

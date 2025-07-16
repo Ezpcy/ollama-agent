@@ -130,6 +130,10 @@ impl PermissionManager {
                 format!("Execute command: {}", command),
                 RiskLevel::Dangerous,
             ),
+            AvailableTool::GenerateCommand { user_request, .. } => (
+                format!("Generate command for: {}", user_request),
+                RiskLevel::Safe,
+            ),
             AvailableTool::ListDirectory { path } => {
                 (format!("List directory: {}", path), RiskLevel::Safe)
             }
@@ -186,6 +190,17 @@ impl PermissionManager {
                     "Warning:".red().bold()
                 );
             }
+            AvailableTool::GenerateCommand { user_request, context } => {
+                println!("  {} {}", "Type:".blue(), "Command Generation".green());
+                println!("  {} {}", "Request:".blue(), user_request.yellow());
+                if let Some(ctx) = context {
+                    println!("  {} {}", "Context:".blue(), ctx.dimmed());
+                }
+                println!(
+                    "  {} Generate a command suggestion based on the request",
+                    "Effect:".blue()
+                );
+            }
             _ => {
                 println!("  {} {:?}", "Type:".blue(), tool);
             }
@@ -199,6 +214,7 @@ impl PermissionManager {
             AvailableTool::WebScrape { url } => format!("web_scrape:{}", url),
             AvailableTool::FileWrite { path, .. } => format!("file_write:{}", path),
             AvailableTool::ExecuteCommand { command } => format!("execute_command:{}", command),
+            AvailableTool::GenerateCommand { user_request, .. } => format!("generate_command:{}", user_request),
             _ => format!("{:?}", std::mem::discriminant(tool)),
         }
     }

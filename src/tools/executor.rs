@@ -2,6 +2,7 @@ use colored::Colorize;
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::fs;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command;
 use walkdir::WalkDir;
@@ -114,7 +115,7 @@ impl ToolExecutor {
         })
     }
 
-    // File operations - Legacy basic search
+    // File operations - Fuzzy search enabled
     pub fn file_search(
         &self,
         pattern: &str,
@@ -128,26 +129,59 @@ impl ToolExecutor {
             search_dir.blue()
         );
 
-        let regex = Regex::new(pattern)?;
+        // Use synchronous fuzzy matching implementation
         let mut found_files = Vec::new();
-
-        for entry in WalkDir::new(search_dir).follow_links(true) {
+        let search_path = std::path::Path::new(search_dir);
+        
+        let pattern_lower = pattern.to_lowercase();
+        
+        for entry in WalkDir::new(search_path).follow_links(false) {
             let entry = entry?;
             if entry.file_type().is_file() {
-                if let Some(filename) = entry.file_name().to_str() {
-                    if regex.is_match(filename) {
-                        found_files.push(entry.path().display().to_string());
+                let path = entry.path();
+                
+                // Skip ignored files/directories
+                if self.should_ignore_path(path) {
+                    continue;
+                }
+                
+                // Check filename for fuzzy match
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    if let Some(score) = self.fuzzy_match_sync(&pattern_lower, &filename.to_lowercase()) {
+                        found_files.push((path.to_path_buf(), score));
+                    }
+                }
+                
+                // Also check full path for better directory matching
+                let full_path = path.to_string_lossy();
+                if let Some(score) = self.fuzzy_match_sync(&pattern_lower, &full_path.to_lowercase()) {
+                    // Update score if this is better than filename match
+                    if let Some(existing) = found_files.iter_mut().find(|(p, _)| p == path) {
+                        if score > existing.1 {
+                            existing.1 = score;
+                        }
+                    } else {
+                        found_files.push((path.to_path_buf(), score));
                     }
                 }
             }
         }
-
+        
+        // Sort by score (descending)
+        found_files.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Format output
+        let mut output = Vec::new();
+        for (path, score) in found_files.iter().take(50) {
+            output.push(format!("{} (score: {:.2})", path.display(), score));
+        }
+        
         Ok(ToolResult {
             success: true,
-            output: if found_files.is_empty() {
+            output: if output.is_empty() {
                 "No files found matching the pattern".to_string()
             } else {
-                found_files.join("\n")
+                output.join("\n")
             },
             error: None,
             metadata: None,
@@ -514,24 +548,138 @@ impl ToolExecutor {
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
         println!("{} Executing command: {}", "⚡".cyan(), command.yellow());
 
-        let output = if cfg!(target_os = "windows") {
-            Command::new("cmd").args(["/C", command]).output()?
+        // Check if we're in a TTY environment
+        let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+        
+        let mut child = if cfg!(target_os = "windows") {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/C", command]);
+            
+            if is_tty {
+                // For TTY environments, inherit stdio to allow interaction
+                cmd.stdin(std::process::Stdio::inherit())
+                   .stdout(std::process::Stdio::inherit())
+                   .stderr(std::process::Stdio::inherit())
+            } else {
+                // For non-TTY environments, use piped stdio
+                cmd.stdin(std::process::Stdio::null())
+                   .stdout(std::process::Stdio::piped())
+                   .stderr(std::process::Stdio::piped())
+            };
+            
+            cmd.spawn()?
         } else {
-            Command::new("sh").args(["-c", command]).output()?
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", command]);
+            
+            if is_tty {
+                // For TTY environments, inherit stdio to allow interaction
+                cmd.stdin(std::process::Stdio::inherit())
+                   .stdout(std::process::Stdio::inherit())
+                   .stderr(std::process::Stdio::inherit())
+            } else {
+                // For non-TTY environments, use piped stdio
+                cmd.stdin(std::process::Stdio::null())
+                   .stdout(std::process::Stdio::piped())
+                   .stderr(std::process::Stdio::piped())
+            };
+            
+            cmd.spawn()?
         };
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let (output_msg, success) = if is_tty {
+            // For TTY environments, just wait for completion
+            let status = child.wait()?;
+            let msg = format!("Command completed with exit code: {}", status.code().unwrap_or(-1));
+            (msg, status.success())
+        } else {
+            // For non-TTY, capture output
+            let output = child.wait_with_output()?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            
+            let msg = if !stdout.is_empty() {
+                stdout.to_string()
+            } else if !stderr.is_empty() {
+                stderr.to_string()
+            } else {
+                format!("Command completed with exit code: {}", output.status.code().unwrap_or(-1))
+            };
+            
+            (msg, output.status.success())
+        };
 
         Ok(ToolResult {
-            success: output.status.success(),
-            output: stdout.to_string(),
-            error: if stderr.is_empty() {
-                None
-            } else {
-                Some(stderr.to_string())
-            },
+            success,
+            output: output_msg,
+            error: None,
             metadata: None,
+        })
+    }
+
+    pub async fn generate_command(
+        &self,
+        user_request: &str,
+        context: Option<&str>,
+    ) -> Result<ToolResult, Box<dyn std::error::Error>> {
+        println!("{} Generating command for: {}", "🤖".cyan(), user_request.yellow());
+
+        // Build the command generation prompt
+        let mut prompt = String::new();
+        
+        // Add system-level context about the operating system
+        let os = std::env::consts::OS;
+        let shell = if cfg!(target_os = "windows") { "cmd" } else { "bash" };
+        
+        prompt.push_str(&format!(
+            "You are a command generation assistant. Generate a single, executable command for the following request.\n\n\
+            Operating System: {}\n\
+            Shell: {}\n\
+            Current Directory: {}\n\n",
+            os,
+            shell,
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "unknown".to_string())
+        ));
+
+        // Add context if provided
+        if let Some(ctx) = context {
+            prompt.push_str(&format!("Context: {}\n\n", ctx));
+        }
+
+        prompt.push_str(&format!(
+            "User Request: {}\n\n\
+            IMPORTANT RULES:\n\
+            - Generate ONLY the command, no explanations\n\
+            - Use appropriate flags and options\n\
+            - Consider safety and common best practices\n\
+            - For project initialization, use standard tools (npx, cargo, etc.)\n\
+            - For file operations, use standard unix tools (find, grep, ls, etc.)\n\
+            - If multiple commands are needed, separate with && or ;\n\
+            - Output format: just the command string\n\n\
+            Examples:\n\
+            Request: \"initialize a next.js project called myapp\"\n\
+            Response: npx create-next-app@latest myapp\n\n\
+            Request: \"find all Python files in the current directory\"\n\
+            Response: find . -name \"*.py\" -type f\n\n\
+            Request: \"search for the word 'function' in JavaScript files\"\n\
+            Response: grep -r \"function\" --include=\"*.js\" .\n\n\
+            Command:",
+            user_request
+        ));
+
+        Ok(ToolResult {
+            success: true,
+            output: prompt,
+            error: None,
+            metadata: Some(serde_json::json!({
+                "type": "command_generation_prompt",
+                "user_request": user_request,
+                "context": context,
+                "os": os,
+                "shell": shell
+            })),
         })
     }
 
@@ -673,5 +821,78 @@ edition = "2021"
         )?;
 
         Ok("Created JavaScript project with package.json and index.js".to_string())
+    }
+    
+    // Helper method to check if a path should be ignored
+    fn should_ignore_path(&self, path: &std::path::Path) -> bool {
+        let path_str = path.to_string_lossy();
+        
+        // Common patterns to ignore
+        let ignore_patterns = [
+            ".git/",
+            "target/",
+            "node_modules/",
+            ".DS_Store",
+            ".tmp",
+            ".log",
+            ".cache",
+            ".lock",
+            "__pycache__/",
+            ".pytest_cache/",
+        ];
+        
+        ignore_patterns.iter().any(|pattern| path_str.contains(pattern))
+    }
+    
+    // Synchronous fuzzy matching for filename search
+    fn fuzzy_match_sync(&self, pattern: &str, text: &str) -> Option<f64> {
+        if pattern.is_empty() {
+            return Some(1.0);
+        }
+
+        let pattern_chars: Vec<char> = pattern.chars().collect();
+        let text_chars: Vec<char> = text.chars().collect();
+        
+        let mut pattern_idx = 0;
+        let mut consecutive_matches = 0;
+        let mut score = 0.0;
+        
+        for (text_idx, &text_char) in text_chars.iter().enumerate() {
+            if pattern_idx < pattern_chars.len() && text_char == pattern_chars[pattern_idx] {
+                pattern_idx += 1;
+                consecutive_matches += 1;
+                
+                // Bonus for consecutive matches
+                score += 1.0 + (consecutive_matches as f64 * 0.1);
+                
+                // Bonus for matches at word boundaries
+                if text_idx == 0 || text_chars[text_idx - 1] == '/' || text_chars[text_idx - 1] == '_' || text_chars[text_idx - 1] == '-' {
+                    score += 0.5;
+                }
+            } else {
+                consecutive_matches = 0;
+            }
+        }
+        
+        // Check if all pattern characters were matched
+        if pattern_idx == pattern_chars.len() {
+            // Calculate final score based on match quality
+            let base_score = score / pattern_chars.len() as f64;
+            
+            // Bonus for shorter text (better matches)
+            let length_bonus = 1.0 / (1.0 + text_chars.len() as f64 * 0.01);
+            
+            // Bonus for matches at the beginning
+            let start_bonus = if pattern_idx > 0 && text_chars.get(0) == pattern_chars.get(0) {
+                0.5
+            } else {
+                0.0
+            };
+            
+            let final_score = base_score * length_bonus + start_bonus;
+            Some(final_score)
+        } else {
+            None
+        }
     }
 }

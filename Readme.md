@@ -1,6 +1,6 @@
 # 🤖 Advanced Ollama AI Assistant
 
-A powerful, extensible AI assistant that integrates with Ollama to provide intelligent system automation, development tools, and much more.
+A powerful, extensible AI assistant that integrates with Ollama to provide intelligent system automation, development tools, and project management across multiple programming languages.
 
 ## ✨ Features
 
@@ -17,7 +17,7 @@ A powerful, extensible AI assistant that integrates with Ollama to provide intel
 - **Git Operations**: Status, commit, push, pull, branching, logs, diffs
 - **File Management**: Read, write, edit, search, watch for changes
 - **System Monitoring**: CPU, memory, disk usage, process management
-- **Package Management**: Cargo, NPM, Pip with dependency management
+- **Package Management**: Cargo, NPM, Pip, Maven, Gradle, Go modules with dependency management
 - **Docker Integration**: Container management, logs, image operations
 
 ### 🌐 Web & API Tools
@@ -41,7 +41,7 @@ A powerful, extensible AI assistant that integrates with Ollama to provide intel
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Rust (latest stable)
+- Rust (latest stable) - for building the assistant
 - Ollama running locally
 - At least one Ollama model installed
 
@@ -88,8 +88,9 @@ cargo run
 > set temperature to 0.8
 > switch to codellama          # Switch model during conversation
 > git status
-> create a rust project called my-app
-> search for rust tutorials
+> analyze my python project
+> create a new java application
+> search for programming tutorials
 > show memory usage
 > list docker containers
 > format this json: {"name":"test"}
@@ -122,10 +123,13 @@ cargo run -- tool docker run nginx --ports 80:80
 # Package management
 cargo run -- tool package cargo build
 cargo run -- tool package npm install express
+cargo run -- tool package mvn clean install
+cargo run -- tool package go mod tidy
 
 # File operations
-cargo run -- tool file read Cargo.toml
-cargo run -- tool file search "*.rs" src/
+cargo run -- tool file read package.json
+cargo run -- tool file search "*.py" src/
+cargo run -- tool file read pom.xml
 ```
 
 ### Model Management
@@ -276,7 +280,7 @@ Configure database connections for SQL operations:
 ```bash
 # Complete development workflow
 > git status
-> cargo test
+> run tests                   # Works with any project type
 > git add .
 > git commit "feat: add new feature"
 > git push origin main
@@ -343,6 +347,8 @@ Universal package management across ecosystems:
 - **Rust (Cargo)**: Build, test, add/remove dependencies
 - **Node.js (NPM)**: Install, run scripts, audit packages
 - **Python (Pip)**: Install, list, search packages
+- **Java (Maven/Gradle)**: Build, test, dependency management
+- **Go (Go modules)**: Module management, dependency resolution
 - **Cross-Platform**: Search packages across all managers
 
 ## 🛡️ Security Features

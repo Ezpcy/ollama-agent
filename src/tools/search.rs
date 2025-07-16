@@ -25,6 +25,8 @@ pub struct SearchResult {
     pub relevance_score: f64,
     pub matches: Vec<Match>,
     pub metadata: FileMetadata,
+    pub fuzzy_score: Option<f64>,
+    pub fuzzy_matches: Vec<usize>, // Character positions that matched
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +47,7 @@ pub struct SearchQuery {
     pub max_results: Option<usize>,
     pub search_content: bool,
     pub search_filenames: bool,
+    pub fuzzy_matching: bool,
 }
 
 impl Default for SearchQuery {
@@ -64,6 +67,7 @@ impl Default for SearchQuery {
             max_results: Some(100),
             search_content: true,
             search_filenames: true,
+            fuzzy_matching: true,
         }
     }
 }
@@ -137,79 +141,35 @@ impl SearchIndex {
         let index = self.file_index.read().await;
         let mut results = Vec::new();
 
-        let regex = if query.is_regex {
-            Regex::new(&query.pattern)?
+        // Use fuzzy matching if enabled, otherwise use regex
+        if query.fuzzy_matching {
+            self.fuzzy_search(&index, query, &mut results);
         } else {
-            let escaped_pattern = if query.case_sensitive {
-                regex::escape(&query.pattern)
+            let regex = if query.is_regex {
+                Regex::new(&query.pattern)?
             } else {
-                format!("(?i){}", regex::escape(&query.pattern))
+                let escaped_pattern = if query.case_sensitive {
+                    regex::escape(&query.pattern)
+                } else {
+                    format!("(?i){}", regex::escape(&query.pattern))
+                };
+                Regex::new(&escaped_pattern)?
             };
-            Regex::new(&escaped_pattern)?
-        };
 
-        for (path, metadata) in index.iter() {
-            if let Some(max_results) = query.max_results {
-                if results.len() >= max_results {
-                    break;
-                }
-            }
-
-            // Check include/exclude patterns
-            if !self.matches_include_patterns(path, &query.include_patterns) {
-                continue;
-            }
-            if self.matches_exclude_patterns(path, &query.exclude_patterns) {
-                continue;
-            }
-
-            let mut matches = Vec::new();
-            let mut relevance_score = 0.0;
-
-            // Search in filename
-            if query.search_filenames {
-                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                    if regex.is_match(filename) {
-                        relevance_score += 10.0; // Filename matches are highly relevant
-                        matches.push(Match {
-                            line_number: 0,
-                            line_content: filename.to_string(),
-                            match_start: 0,
-                            match_end: filename.len(),
-                        });
-                    }
-                }
-            }
-
-            // Search in file content
-            if query.search_content && self.is_text_file(path) {
-                if let Ok(content) = fs::read_to_string(path) {
-                    for (line_number, line) in content.lines().enumerate() {
-                        if let Some(mat) = regex.find(line) {
-                            relevance_score += 1.0;
-                            matches.push(Match {
-                                line_number: line_number + 1,
-                                line_content: line.to_string(),
-                                match_start: mat.start(),
-                                match_end: mat.end(),
-                            });
-                        }
-                    }
-                }
-            }
-
-            if !matches.is_empty() {
-                results.push(SearchResult {
-                    path: path.clone(),
-                    relevance_score,
-                    matches,
-                    metadata: metadata.clone(),
-                });
-            }
+            self.regex_search(&index, query, &regex, &mut results)?;
         }
 
         // Sort by relevance score (descending)
-        results.sort_by(|a, b| b.relevance_score.partial_cmp(&a.relevance_score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            let score_a = a.fuzzy_score.unwrap_or(a.relevance_score);
+            let score_b = b.fuzzy_score.unwrap_or(b.relevance_score);
+            score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Limit results
+        if let Some(max_results) = query.max_results {
+            results.truncate(max_results);
+        }
 
         Ok(results)
     }
@@ -266,6 +226,228 @@ impl SearchIndex {
             matches!(ext, "rs" | "py" | "js" | "ts" | "html" | "css" | "json" | "toml" | "yaml" | "yml" | "md" | "txt" | "log")
         } else {
             false
+        }
+    }
+
+    fn fuzzy_search(&self, index: &HashMap<PathBuf, FileMetadata>, query: &SearchQuery, results: &mut Vec<SearchResult>) {
+        let pattern = if query.case_sensitive {
+            query.pattern.clone()
+        } else {
+            query.pattern.to_lowercase()
+        };
+
+        for (path, metadata) in index.iter() {
+            // Check include/exclude patterns
+            if !self.matches_include_patterns(path, &query.include_patterns) {
+                continue;
+            }
+            if self.matches_exclude_patterns(path, &query.exclude_patterns) {
+                continue;
+            }
+
+            let mut matches = Vec::new();
+            let mut relevance_score = 0.0;
+            let mut fuzzy_score = None;
+            let mut fuzzy_matches = Vec::new();
+
+            // Fuzzy search in filename
+            if query.search_filenames {
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    let search_text = if query.case_sensitive {
+                        filename.to_string()
+                    } else {
+                        filename.to_lowercase()
+                    };
+
+                    if let Some((score, match_positions)) = self.fuzzy_match(&pattern, &search_text) {
+                        relevance_score += score * 10.0; // Filename matches are highly relevant
+                        fuzzy_score = Some(score);
+                        fuzzy_matches = match_positions;
+                        matches.push(Match {
+                            line_number: 0,
+                            line_content: filename.to_string(),
+                            match_start: 0,
+                            match_end: filename.len(),
+                        });
+                    }
+                }
+            }
+
+            // Fuzzy search in full path for better subdirectory matching
+            if query.search_filenames {
+                let full_path = path.to_string_lossy();
+                let search_text = if query.case_sensitive {
+                    full_path.to_string()
+                } else {
+                    full_path.to_lowercase()
+                };
+
+                if let Some((score, match_positions)) = self.fuzzy_match(&pattern, &search_text) {
+                    // Only update if this is a better match than filename alone
+                    if fuzzy_score.map_or(true, |existing| score > existing) {
+                        relevance_score = score * 8.0; // Path matches are also highly relevant
+                        fuzzy_score = Some(score);
+                        fuzzy_matches = match_positions;
+                        
+                        // Add or update the match
+                        if matches.is_empty() {
+                            matches.push(Match {
+                                line_number: 0,
+                                line_content: full_path.to_string(),
+                                match_start: 0,
+                                match_end: full_path.len(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Fuzzy search in file content
+            if query.search_content && self.is_text_file(path) {
+                if let Ok(content) = fs::read_to_string(path) {
+                    for (line_number, line) in content.lines().enumerate() {
+                        let search_text = if query.case_sensitive {
+                            line.to_string()
+                        } else {
+                            line.to_lowercase()
+                        };
+
+                        if let Some((score, _)) = self.fuzzy_match(&pattern, &search_text) {
+                            relevance_score += score;
+                            matches.push(Match {
+                                line_number: line_number + 1,
+                                line_content: line.to_string(),
+                                match_start: 0,
+                                match_end: line.len(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            if !matches.is_empty() {
+                results.push(SearchResult {
+                    path: path.clone(),
+                    relevance_score,
+                    matches,
+                    metadata: metadata.clone(),
+                    fuzzy_score,
+                    fuzzy_matches,
+                });
+            }
+        }
+    }
+
+    fn regex_search(&self, index: &HashMap<PathBuf, FileMetadata>, query: &SearchQuery, regex: &Regex, results: &mut Vec<SearchResult>) -> Result<(), Box<dyn std::error::Error>> {
+        for (path, metadata) in index.iter() {
+            // Check include/exclude patterns
+            if !self.matches_include_patterns(path, &query.include_patterns) {
+                continue;
+            }
+            if self.matches_exclude_patterns(path, &query.exclude_patterns) {
+                continue;
+            }
+
+            let mut matches = Vec::new();
+            let mut relevance_score = 0.0;
+
+            // Search in filename
+            if query.search_filenames {
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    if regex.is_match(filename) {
+                        relevance_score += 10.0; // Filename matches are highly relevant
+                        matches.push(Match {
+                            line_number: 0,
+                            line_content: filename.to_string(),
+                            match_start: 0,
+                            match_end: filename.len(),
+                        });
+                    }
+                }
+            }
+
+            // Search in file content
+            if query.search_content && self.is_text_file(path) {
+                if let Ok(content) = fs::read_to_string(path) {
+                    for (line_number, line) in content.lines().enumerate() {
+                        if let Some(mat) = regex.find(line) {
+                            relevance_score += 1.0;
+                            matches.push(Match {
+                                line_number: line_number + 1,
+                                line_content: line.to_string(),
+                                match_start: mat.start(),
+                                match_end: mat.end(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            if !matches.is_empty() {
+                results.push(SearchResult {
+                    path: path.clone(),
+                    relevance_score,
+                    matches,
+                    metadata: metadata.clone(),
+                    fuzzy_score: None,
+                    fuzzy_matches: Vec::new(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    // FZF-like fuzzy matching algorithm
+    fn fuzzy_match(&self, pattern: &str, text: &str) -> Option<(f64, Vec<usize>)> {
+        if pattern.is_empty() {
+            return Some((1.0, Vec::new()));
+        }
+
+        let pattern_chars: Vec<char> = pattern.chars().collect();
+        let text_chars: Vec<char> = text.chars().collect();
+        
+        let mut pattern_idx = 0;
+        let mut match_positions = Vec::new();
+        let mut consecutive_matches = 0;
+        let mut score = 0.0;
+        
+        for (text_idx, &text_char) in text_chars.iter().enumerate() {
+            if pattern_idx < pattern_chars.len() && text_char == pattern_chars[pattern_idx] {
+                match_positions.push(text_idx);
+                pattern_idx += 1;
+                consecutive_matches += 1;
+                
+                // Bonus for consecutive matches
+                score += 1.0 + (consecutive_matches as f64 * 0.1);
+                
+                // Bonus for matches at word boundaries
+                if text_idx == 0 || text_chars[text_idx - 1] == '/' || text_chars[text_idx - 1] == '_' || text_chars[text_idx - 1] == '-' {
+                    score += 0.5;
+                }
+            } else {
+                consecutive_matches = 0;
+            }
+        }
+        
+        // Check if all pattern characters were matched
+        if pattern_idx == pattern_chars.len() {
+            // Calculate final score based on match quality
+            let base_score = score / pattern_chars.len() as f64;
+            
+            // Bonus for shorter text (better matches)
+            let length_bonus = 1.0 / (1.0 + text_chars.len() as f64 * 0.01);
+            
+            // Bonus for matches at the beginning of filename
+            let start_bonus = if !match_positions.is_empty() && match_positions[0] == 0 {
+                0.5
+            } else {
+                0.0
+            };
+            
+            let final_score = base_score * length_bonus + start_bonus;
+            Some((final_score, match_positions))
+        } else {
+            None
         }
     }
 }

@@ -245,7 +245,7 @@ impl ToolExecutor {
             }
             PipOperation::List => {
                 cmd.arg("list");
-                if let Some(pkg) = package {
+                if let Some(_pkg) = package {
                     // Use grep-like functionality to filter
                     cmd.arg("--format").arg("columns");
                 }
@@ -273,15 +273,15 @@ impl ToolExecutor {
         let mut result_output = String::from_utf8_lossy(&output.stdout).to_string();
 
         // Filter output if showing specific package in list
-        if let (PipOperation::List, Some(pkg)) = (&operation, package) {
+        if let (PipOperation::List, Some(_pkg)) = (&operation, package) {
             let filtered_lines: Vec<&str> = result_output
                 .lines()
-                .filter(|line| line.to_lowercase().contains(&pkg.to_lowercase()))
+                .filter(|line| line.to_lowercase().contains(&_pkg.to_lowercase()))
                 .collect();
             if !filtered_lines.is_empty() {
                 result_output = filtered_lines.join("\n");
             } else {
-                result_output = format!("Package '{}' not found in installed packages", pkg);
+                result_output = format!("Package '{}' not found in installed packages", _pkg);
             }
         }
 

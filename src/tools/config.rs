@@ -60,7 +60,7 @@ impl ToolExecutor {
             value
         );
 
-        let config_path = self.get_config_path()?;
+        let _config_path = self.get_config_path()?;
         let mut config = self.load_config().await.unwrap_or_default();
 
         match key {

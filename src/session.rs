@@ -5,12 +5,13 @@ use crate::client::{stream_response, SelectedModel};
 use crate::input::VimInputHandler;
 use crate::tools::{
     AvailableTool, ConversationEntry, NaturalLanguageParser, PermissionManager,
-    ToolExecutor, ToolResult,
+    ToolExecutor, AsyncToolExecutor, ResourceLimits,
 };
 
 pub struct AssistantSession {
     model: SelectedModel,
     tool_executor: ToolExecutor,
+    async_executor: AsyncToolExecutor,
     permission_manager: PermissionManager,
     parser: NaturalLanguageParser,
     conversation_history: Vec<ConversationEntry>,
@@ -32,9 +33,12 @@ impl AssistantSession {
         // Initialize the global config with the selected model
         Self::init_global_config(&model);
         
+        let async_executor = AsyncToolExecutor::new(ResourceLimits::default());
+        
         Self {
             model,
             tool_executor,
+            async_executor,
             permission_manager: PermissionManager::new(),
             parser: NaturalLanguageParser::new(),
             conversation_history: Vec::new(),
@@ -90,6 +94,23 @@ impl AssistantSession {
                 continue;
             }
 
+            if self.is_performance_command(&user_input) {
+                // TODO: Implement performance summary display
+                println!("Performance summary not yet implemented");
+                continue;
+            }
+
+            if self.is_resource_usage_command(&user_input) {
+                let usage = self.async_executor.get_resource_usage().await;
+                usage.display();
+                continue;
+            }
+
+            if self.is_clear_logs_command(&user_input) {
+                crate::tools::logging::clear_logs().await;
+                continue;
+            }
+
             if let Err(e) = self.process_request(&user_input).await {
                 println!("{} {}", "Error processing request:".red(), e);
                 self.session_stats.failed_operations += 1;
@@ -141,6 +162,9 @@ impl AssistantSession {
         println!();
         println!("{}", "Special Commands:".blue().bold());
         println!("  {} Show session statistics", "stats".yellow());
+        println!("  {} Show performance metrics", "performance".yellow());
+        println!("  {} Show resource usage", "resources".yellow());
+        println!("  {} Clear logs and metrics", "clear logs".yellow());
         println!("  {} Show available commands", "help".yellow());
         println!("  {} Exit the session", "quit/exit".yellow());
         println!();
@@ -431,7 +455,7 @@ impl AssistantSession {
         context
     }
 
-    fn build_tool_context(&self, user_input: &str, results: &[ToolResult]) -> String {
+    fn build_tool_context(&self, user_input: &str, results: &[crate::tools::core::ToolResult]) -> String {
         let mut context = format!("User requested: {}\n\n", user_input);
 
         context.push_str("Tool execution results:\n");
@@ -499,6 +523,21 @@ impl AssistantSession {
         lower.starts_with("switch to") || lower.starts_with("use model") || lower.starts_with("change model")
     }
 
+    fn is_performance_command(&self, input: &str) -> bool {
+        let lower = input.trim().to_lowercase();
+        matches!(lower.as_str(), "performance" | "perf" | "metrics" | "show performance")
+    }
+
+    fn is_resource_usage_command(&self, input: &str) -> bool {
+        let lower = input.trim().to_lowercase();
+        matches!(lower.as_str(), "resources" | "resource usage" | "usage" | "show resources")
+    }
+
+    fn is_clear_logs_command(&self, input: &str) -> bool {
+        let lower = input.trim().to_lowercase();
+        matches!(lower.as_str(), "clear logs" | "clear log" | "reset logs" | "clear metrics")
+    }
+
     async fn handle_model_switch(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
         let lower = input.trim().to_lowercase();
         
@@ -515,28 +554,50 @@ impl AssistantSession {
         // Get available models
         let available_models = crate::client::fetch_models().await?;
         
-        // Find the model
-        if let Some(model) = available_models.iter().find(|m| m.name.to_lowercase().contains(model_name)) {
-            let old_model = self.model.name.clone();
-            
-            // Update the global model config first
-            let result = self.tool_executor.switch_model(&model.name).await?;
-            
-            if result.success {
-                // Update the session's model
-                self.model = crate::client::SelectedModel::from(model.clone());
-                
-                println!("{} Successfully switched from '{}' to '{}'", 
-                        "✅".green(), old_model, model.name);
-                self.model.display_info();
-            } else {
-                return Err(result.error.unwrap_or("Unknown error switching model".to_string()).into());
+        // Find the model (support partial matching)
+        let matching_models: Vec<_> = available_models.iter()
+            .filter(|m| m.name.to_lowercase().contains(model_name))
+            .collect();
+        
+        match matching_models.len() {
+            0 => {
+                let available_names: Vec<String> = available_models.iter().map(|m| m.name.clone()).collect();
+                println!("{} Model '{}' not found. Available models:", "❌".red(), model_name);
+                for name in available_names {
+                    println!("  • {}", name.yellow());
+                }
             }
-        } else {
-            let available_names: Vec<String> = available_models.iter().map(|m| m.name.clone()).collect();
-            println!("{} Model '{}' not found. Available models:", "❌".red(), model_name);
-            for name in available_names {
-                println!("  • {}", name.yellow());
+            1 => {
+                let model = matching_models[0];
+                let old_model = self.model.name.clone();
+                
+                // Don't switch if it's the same model
+                if old_model == model.name {
+                    println!("{} Already using model '{}'", "ℹ️".blue(), model.name);
+                    return Ok(());
+                }
+                
+                // Update the global model config first
+                let result = self.tool_executor.switch_model(&model.name).await?;
+                
+                if result.success {
+                    // Update the session's model
+                    self.model = crate::client::SelectedModel::from(model.clone());
+                    
+                    println!("{} Successfully switched from '{}' to '{}'", 
+                            "✅".green(), old_model, model.name);
+                    
+                    // Show brief model info
+                    println!("{} Model ready for your next request", "🤖".cyan());
+                } else {
+                    return Err(result.error.unwrap_or("Unknown error switching model".to_string()).into());
+                }
+            }
+            _ => {
+                println!("{} Multiple models match '{}'. Please be more specific:", "⚠️".yellow(), model_name);
+                for model in matching_models {
+                    println!("  • {}", model.name.yellow());
+                }
             }
         }
         

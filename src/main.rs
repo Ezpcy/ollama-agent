@@ -481,7 +481,7 @@ async fn run_diagnostics() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "Running System Diagnostics...".cyan().bold());
     println!();
 
-    let executor = ToolExecutor::new();
+    let _executor = ToolExecutor::new();
 
     // Test different subsystems
     let tests = vec![

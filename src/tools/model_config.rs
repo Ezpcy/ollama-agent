@@ -1,7 +1,6 @@
 use super::core::{ModelParameter, ToolExecutor, ToolResult};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

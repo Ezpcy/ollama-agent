@@ -5,11 +5,11 @@ pkgrel=1                       # Package release; increment when PKGBUILD change
 pkgdesc="Ollama CLI Assistant"  # Short description of the package
 arch=('x86_64')                # Supported architectures
 url="https://github.com/Ezpcy/ollama-cli-assistant"  # Project homepage
-license=('')                # License type
+license=('MIT')                # License type
 
 # Build and runtime dependencies
 makedepends=('cargo' 'rust')  # Needed to compile the Rust project
-depends=('')           # Runtime dependencies (adjust as necessary)
+depends=('openssl')           # Runtime dependencies (adjust as necessary)
 
 # Source: Git clone of your repository at the matching version tag
 source=("git+https://github.com/ezpcy/ollama-cli-assistant.git#tag=v${pkgver}")

@@ -1,5 +1,6 @@
 use super::core::{
-    AvailableTool, HttpMethod, ModelParameter,
+    AvailableTool, HttpMethod, ModelParameter, TextOperation, ExportFormat,
+    CargoOperation, NpmOperation, PipOperation, DockerResourceType,
 };
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -525,6 +526,240 @@ Analyze the request and respond with JSON only:"#,
                     }
                 }
 
+                // File operations
+                "FileSearch" => {
+                    if let Some(pattern) = tool_req.parameters.get("pattern").and_then(|v| v.as_str()) {
+                        let directory = tool_req.parameters.get("path").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        tools.push(AvailableTool::FileSearch {
+                            pattern: pattern.to_string(),
+                            directory,
+                        });
+                    }
+                }
+                "ContentSearch" => {
+                    if let Some(pattern) = tool_req.parameters.get("pattern").and_then(|v| v.as_str()) {
+                        let directory = tool_req.parameters.get("path").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        tools.push(AvailableTool::ContentSearch {
+                            pattern: pattern.to_string(),
+                            directory,
+                        });
+                    }
+                }
+                "ListDirectory" => {
+                    let path = tool_req.parameters.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+                    tools.push(AvailableTool::ListDirectory {
+                        path: path.to_string(),
+                    });
+                }
+                "ExecuteCommand" => {
+                    if let Some(command) = tool_req.parameters.get("command").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::ExecuteCommand {
+                            command: command.to_string(),
+                        });
+                    }
+                }
+                
+                // Project operations
+                "CreateProject" => {
+                    if let Some(name) = tool_req.parameters.get("name").and_then(|v| v.as_str()) {
+                        let project_type = tool_req.parameters.get("template").and_then(|v| v.as_str()).unwrap_or("basic");
+                        let path = tool_req.parameters.get("path").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        tools.push(AvailableTool::CreateProject {
+                            name: name.to_string(),
+                            project_type: project_type.to_string(),
+                            path,
+                        });
+                    }
+                }
+                
+                // Package management
+                "CargoOperation" => {
+                    if let Some(action) = tool_req.parameters.get("action").and_then(|v| v.as_str()) {
+                        let operation = match action.to_lowercase().as_str() {
+                            "build" => CargoOperation::Build,
+                            "run" => CargoOperation::Run,
+                            "test" => CargoOperation::Test,
+                            "check" => CargoOperation::Check,
+                            "install" => CargoOperation::Install,
+                            _ => CargoOperation::Build, // default
+                        };
+                        let package = tool_req.parameters.get("package").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        tools.push(AvailableTool::CargoOperation {
+                            operation,
+                            package,
+                            features: None,
+                        });
+                    }
+                }
+                "NpmOperation" => {
+                    if let Some(action) = tool_req.parameters.get("action").and_then(|v| v.as_str()) {
+                        let operation = match action.to_lowercase().as_str() {
+                            "install" => NpmOperation::Install,
+                            "uninstall" => NpmOperation::Uninstall,
+                            "update" => NpmOperation::Update,
+                            "audit" => NpmOperation::Audit,
+                            script => NpmOperation::Run { script: script.to_string() },
+                        };
+                        let package = tool_req.parameters.get("package").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        tools.push(AvailableTool::NpmOperation {
+                            operation,
+                            package,
+                            dev: false,
+                        });
+                    }
+                }
+                "PipOperation" => {
+                    if let Some(action) = tool_req.parameters.get("action").and_then(|v| v.as_str()) {
+                        let operation = match action.to_lowercase().as_str() {
+                            "install" => PipOperation::Install,
+                            "uninstall" => PipOperation::Uninstall,
+                            "list" => PipOperation::List,
+                            "freeze" => PipOperation::Freeze,
+                            "show" => PipOperation::Show,
+                            _ => PipOperation::List, // default
+                        };
+                        let package = tool_req.parameters.get("package").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        tools.push(AvailableTool::PipOperation {
+                            operation,
+                            package,
+                            requirements_file: None,
+                        });
+                    }
+                }
+                
+                // Docker operations
+                "DockerList" => {
+                    tools.push(AvailableTool::DockerList {
+                        resource_type: DockerResourceType::Containers,
+                    });
+                }
+                "DockerRun" => {
+                    if let Some(image) = tool_req.parameters.get("image").and_then(|v| v.as_str()) {
+                        let command = tool_req.parameters.get("command").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        tools.push(AvailableTool::DockerRun {
+                            image: image.to_string(),
+                            command,
+                            ports: None,
+                            volumes: None,
+                            environment: None,
+                        });
+                    }
+                }
+                "DockerStop" => {
+                    if let Some(container) = tool_req.parameters.get("container").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::DockerStop {
+                            container: container.to_string(),
+                        });
+                    }
+                }
+                "DockerLogs" => {
+                    if let Some(container) = tool_req.parameters.get("container").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::DockerLogs {
+                            container: container.to_string(),
+                            follow: false,
+                            tail: None,
+                        });
+                    }
+                }
+                
+                // Text processing
+                "JsonFormat" => {
+                    if let Some(input) = tool_req.parameters.get("json").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::JsonFormat {
+                            input: input.to_string(),
+                        });
+                    }
+                }
+                "JsonQuery" => {
+                    if let Some(input) = tool_req.parameters.get("json").and_then(|v| v.as_str()) {
+                        if let Some(query) = tool_req.parameters.get("query").and_then(|v| v.as_str()) {
+                            tools.push(AvailableTool::JsonQuery {
+                                input: input.to_string(),
+                                query: query.to_string(),
+                            });
+                        }
+                    }
+                }
+                "CsvParse" => {
+                    if let Some(input) = tool_req.parameters.get("csv").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::CsvParse {
+                            input: input.to_string(),
+                            delimiter: None,
+                        });
+                    }
+                }
+                "RegexMatch" => {
+                    if let Some(text) = tool_req.parameters.get("text").and_then(|v| v.as_str()) {
+                        if let Some(pattern) = tool_req.parameters.get("pattern").and_then(|v| v.as_str()) {
+                            tools.push(AvailableTool::RegexMatch {
+                                pattern: pattern.to_string(),
+                                text: text.to_string(),
+                                flags: None,
+                            });
+                        }
+                    }
+                }
+                "TextTransform" => {
+                    if let Some(input) = tool_req.parameters.get("text").and_then(|v| v.as_str()) {
+                        if let Some(operation_str) = tool_req.parameters.get("operation").and_then(|v| v.as_str()) {
+                            let operation = match operation_str.to_lowercase().as_str() {
+                                "uppercase" => TextOperation::ToUpperCase,
+                                "lowercase" => TextOperation::ToLowerCase,
+                                "trim" => TextOperation::Trim,
+                                _ => TextOperation::ToLowerCase, // default
+                            };
+                            tools.push(AvailableTool::TextTransform {
+                                input: input.to_string(),
+                                operation,
+                            });
+                        }
+                    }
+                }
+                
+                // Configuration operations
+                "ExportConversation" => {
+                    if let Some(path) = tool_req.parameters.get("filename").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::ExportConversation {
+                            format: ExportFormat::Json,
+                            path: path.to_string(),
+                        });
+                    }
+                }
+                "ImportConversation" => {
+                    if let Some(path) = tool_req.parameters.get("filename").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::ImportConversation {
+                            path: path.to_string(),
+                        });
+                    }
+                }
+                "ClearHistory" => {
+                    tools.push(AvailableTool::ClearHistory);
+                }
+                
+                // Task scheduling
+                "ScheduleTask" => {
+                    if let Some(command) = tool_req.parameters.get("command").and_then(|v| v.as_str()) {
+                        if let Some(schedule) = tool_req.parameters.get("schedule").and_then(|v| v.as_str()) {
+                            let name = tool_req.parameters.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            tools.push(AvailableTool::ScheduleTask {
+                                command: command.to_string(),
+                                schedule: schedule.to_string(),
+                                name,
+                            });
+                        }
+                    }
+                }
+                "ListScheduledTasks" => {
+                    tools.push(AvailableTool::ListScheduledTasks);
+                }
+                "CancelScheduledTask" => {
+                    if let Some(name) = tool_req.parameters.get("name").and_then(|v| v.as_str()) {
+                        tools.push(AvailableTool::CancelScheduledTask {
+                            name: name.to_string(),
+                        });
+                    }
+                }
+                
                 // Add more tool conversions here...
                 _ => {
                     println!(

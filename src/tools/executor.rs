@@ -7,6 +7,7 @@ use std::process::Command;
 use walkdir::WalkDir;
 
 use super::core::{EditOperation, ToolExecutor, ToolResult};
+use super::search::{enhanced_file_search, SearchQuery, ToolChain, ErrorStrategy};
 
 impl ToolExecutor {
     // Web search implementation
@@ -113,7 +114,7 @@ impl ToolExecutor {
         })
     }
 
-    // File operations
+    // File operations - Legacy basic search
     pub fn file_search(
         &self,
         pattern: &str,
@@ -151,6 +152,142 @@ impl ToolExecutor {
             error: None,
             metadata: None,
         })
+    }
+
+    // Enhanced file search with ranking and content search
+    pub async fn enhanced_file_search(
+        &self,
+        pattern: &str,
+        directory: Option<&str>,
+        search_content: bool,
+        is_regex: bool,
+        max_results: Option<usize>,
+    ) -> Result<ToolResult, Box<dyn std::error::Error>> {
+        let search_dir = Path::new(directory.unwrap_or("."));
+        
+        let query = SearchQuery {
+            pattern: pattern.to_string(),
+            is_regex,
+            case_sensitive: false,
+            search_content,
+            search_filenames: true,
+            max_results,
+            ..Default::default()
+        };
+
+        enhanced_file_search(search_dir, &query).await
+    }
+
+    // Tool chain execution for complex file operations
+    pub async fn execute_tool_chain(
+        &self,
+        chain: &ToolChain,
+    ) -> Result<Vec<ToolResult>, Box<dyn std::error::Error>> {
+        let mut results = Vec::new();
+        
+        for (_index, step) in chain.steps.iter().enumerate() {
+            let mut retries = 0;
+            let _max_retries = match &chain.error_strategy {
+                ErrorStrategy::RetryWithBackoff { max_retries, .. } => *max_retries,
+                _ => 0,
+            };
+
+            loop {
+                let result = self.execute_chain_step(step, &results).await;
+                
+                match result {
+                    Ok(tool_result) => {
+                        results.push(tool_result);
+                        break;
+                    }
+                    Err(e) => {
+                        match &chain.error_strategy {
+                            ErrorStrategy::FailFast => return Err(e),
+                            ErrorStrategy::ContinueOnError => {
+                                results.push(ToolResult {
+                                    success: false,
+                                    output: String::new(),
+                                    error: Some(e.to_string()),
+                                    metadata: None,
+                                });
+                                break;
+                            }
+                            ErrorStrategy::RetryWithBackoff { max_retries, backoff_ms } => {
+                                if retries < *max_retries {
+                                    retries += 1;
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(*backoff_ms)).await;
+                                    continue;
+                                } else {
+                                    return Err(e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    async fn execute_chain_step(
+        &self,
+        step: &super::search::ChainStep,
+        previous_results: &[ToolResult],
+    ) -> Result<ToolResult, Box<dyn std::error::Error>> {
+        let mut params = step.parameters.clone();
+        
+        // If this step depends on a previous result, incorporate it
+        if let Some(dep_index) = step.depends_on {
+            if let Some(prev_result) = previous_results.get(dep_index) {
+                if step.use_previous_result {
+                    // Extract the first line as the file path if it's a file search result
+                    if step.tool_name == "file_read" {
+                        let first_line = prev_result.output.lines().next().unwrap_or("");
+                        params.insert("path".to_string(), first_line.to_string());
+                    }
+                }
+            }
+        }
+
+        // Execute the appropriate tool based on the step name
+        match step.tool_name.as_str() {
+            "file_search" => {
+                let default_pattern = String::new();
+                let pattern = params.get("pattern").unwrap_or(&default_pattern);
+                let directory = params.get("directory");
+                self.file_search(pattern, directory.map(|s| s.as_str()))
+            }
+            "file_read" => {
+                let default_path = String::new();
+                let path = params.get("path").unwrap_or(&default_path);
+                self.file_read(path)
+            }
+            "enhanced_file_search" => {
+                let default_pattern = String::new();
+                let pattern = params.get("pattern").unwrap_or(&default_pattern);
+                let directory = params.get("directory");
+                let search_content = params.get("search_content")
+                    .map(|s| s.parse().unwrap_or(true))
+                    .unwrap_or(true);
+                let is_regex = params.get("is_regex")
+                    .map(|s| s.parse().unwrap_or(false))
+                    .unwrap_or(false);
+                let max_results = params.get("max_results")
+                    .and_then(|s| s.parse().ok());
+                    
+                self.enhanced_file_search(
+                    pattern,
+                    directory.map(|s| s.as_str()),
+                    search_content,
+                    is_regex,
+                    max_results,
+                ).await
+            }
+            _ => {
+                Err(format!("Unknown tool in chain: {}", step.tool_name).into())
+            }
+        }
     }
 
     pub fn file_read(&self, path: &str) -> Result<ToolResult, Box<dyn std::error::Error>> {

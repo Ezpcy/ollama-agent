@@ -8,7 +8,7 @@ impl ToolExecutor {
         &self,
         resource_type: DockerResourceType,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        let (cmd_arg, description) = match resource_type {
+        let (_cmd_arg, description) = match resource_type {
             DockerResourceType::Containers => ("ps", "containers"),
             DockerResourceType::Images => ("images", "images"),
             DockerResourceType::Volumes => ("volume", "volumes"),

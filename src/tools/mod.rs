@@ -5,12 +5,16 @@ pub mod permissions;
 
 // New modules
 pub mod api;
+pub mod async_executor;
 pub mod config;
 pub mod database;
 pub mod docker;
+pub mod errors;
 pub mod git;
+pub mod logging;
 pub mod model_config;
 pub mod package;
+pub mod search;
 pub mod system;
 pub mod text;
 
@@ -18,8 +22,7 @@ pub mod text;
 pub use core::*;
 
 // Re-export commonly used items
-pub use config::{AppConfig, ConversationEntry};
-pub use executor::*;
-pub use model_config::{create_enhanced_request, get_current_model_config, ModelConfig};
+pub use async_executor::*;
+pub use config::ConversationEntry;
 pub use parser::*;
 pub use permissions::*;

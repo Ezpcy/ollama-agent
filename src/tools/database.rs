@@ -267,7 +267,7 @@ impl ToolExecutor {
         &self,
         database_type: DatabaseType,
         connection_string: &str,
-        database_name: Option<&str>,
+        _database_name: Option<&str>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
         println!("{} Listing tables for {:?}", "📋".cyan(), database_type);
 

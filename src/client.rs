@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::select;
 use tokio::time::{sleep, Duration};
-use tokio_stream::StreamExt;
 
 #[derive(Deserialize, Debug)]
 pub struct ModelsResponse {

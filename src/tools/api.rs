@@ -89,7 +89,7 @@ impl ToolExecutor {
         &self,
         endpoint: &str,
         operation: RestOperation,
-        data: Option<serde_json::Value>,
+        _data: Option<serde_json::Value>,
         auth: Option<ApiAuth>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
         println!(
@@ -192,7 +192,6 @@ impl ToolExecutor {
 // Helper function for base64 encoding (you might want to add the base64 crate to dependencies)
 mod base64 {
     pub fn encode(input: &str) -> String {
-        use std::collections::HashMap;
 
         // Simple base64 implementation - in production, use the base64 crate
         let chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

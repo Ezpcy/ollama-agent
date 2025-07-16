@@ -1,11 +1,9 @@
 use super::core::{
-    ApiAuth, AvailableTool, CargoOperation, DatabaseType, DockerResourceType, EditOperation,
-    ExportFormat, GitBranchOperation, HttpMethod, ModelParameter, NpmOperation, PipOperation,
-    RestOperation, TextOperation,
+    AvailableTool, HttpMethod, ModelParameter,
 };
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+// use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ToolAnalysis {
@@ -58,7 +56,8 @@ impl NaturalLanguageParser {
     }
 
     fn parse_immediate_commands(&self, input: &str) -> Option<AvailableTool> {
-        let lower = input.to_lowercase().trim();
+        let binding = input.to_lowercase();
+        let lower = binding.trim();
 
         // Model parameter commands
         if lower.starts_with("set temperature") {

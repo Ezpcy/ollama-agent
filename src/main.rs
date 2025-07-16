@@ -366,8 +366,9 @@ async fn start_chat_session(
     // Start enhanced assistant session
     let mut session = AssistantSession::new(selected_model, tool_executor);
 
+    // TODO: Implement vim mode support
     if vim_mode {
-        session.enable_vim_mode();
+        println!("Vim mode requested but not yet implemented");
     }
 
     session.run().await?;
@@ -484,18 +485,27 @@ async fn run_diagnostics() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test different subsystems
     let tests = vec![
-        ("Ollama Connection", test_ollama_connection()),
-        ("File System Access", test_file_system()),
-        ("Network Access", test_network_access()),
-        ("Package Managers", test_package_managers()),
-        ("System Commands", test_system_commands()),
+        "Ollama Connection",
+        "File System Access", 
+        "Network Access",
+        "Package Managers",
+        "System Commands",
     ];
 
-    for (test_name, test_future) in tests {
+    for test_name in tests {
         print!("Testing {}: ", test_name);
         io::stdout().flush().unwrap();
 
-        match test_future.await {
+        let result = match test_name {
+            "Ollama Connection" => test_ollama_connection().await,
+            "File System Access" => test_file_system().await,
+            "Network Access" => test_network_access().await,
+            "Package Managers" => test_package_managers().await,
+            "System Commands" => test_system_commands().await,
+            _ => Ok(()),
+        };
+
+        match result {
             Ok(_) => println!("{}", "✅ PASS".green()),
             Err(e) => println!("{} {}", "❌ FAIL".red(), e.to_string().dimmed()),
         }
@@ -691,15 +701,15 @@ async fn handle_package_command(
 
     let result = match command {
         PackageCommands::Cargo { cargo_command } => {
-            let operation = match cargo_command {
+            let operation = match &cargo_command {
                 CargoCommands::Build => CargoOperation::Build,
                 CargoCommands::Run => CargoOperation::Run,
                 CargoCommands::Test => CargoOperation::Test,
-                CargoCommands::Add { package } => CargoOperation::Add,
-                CargoCommands::Remove { package } => CargoOperation::Remove,
+                CargoCommands::Add { package: _ } => CargoOperation::Add,
+                CargoCommands::Remove { package: _ } => CargoOperation::Remove,
             };
 
-            let package = match cargo_command {
+            let package = match &cargo_command {
                 CargoCommands::Add { package } | CargoCommands::Remove { package } => {
                     Some(package.as_str())
                 }
@@ -781,8 +791,9 @@ async fn execute_single_command(
     let tool_executor = ToolExecutor::new();
     let mut session = AssistantSession::new(selected_model, tool_executor);
 
+    // TODO: Implement vim mode support
     if vim_mode {
-        session.enable_vim_mode();
+        println!("Vim mode requested but not yet implemented");
     }
 
     session.process_single_command(command).await?;

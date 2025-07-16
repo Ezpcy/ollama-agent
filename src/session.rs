@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::client::{stream_response, SelectedModel};
 use crate::tools::{
-    AppConfig, AvailableTool, ConversationEntry, NaturalLanguageParser, PermissionManager,
+    AvailableTool, ConversationEntry, NaturalLanguageParser, PermissionManager,
     ToolExecutor, ToolResult,
 };
 

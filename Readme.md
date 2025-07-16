@@ -1,6 +1,6 @@
 # 🤖 Advanced Ollama AI Assistant
 
-A powerful, extensible AI assistant that integrates with Ollama to provide intelligent system automation, development tools, and much more. 
+A powerful, extensible AI assistant that integrates with Ollama to provide intelligent system automation, development tools, and much more.
 
 ## ✨ Features
 
@@ -8,7 +8,10 @@ A powerful, extensible AI assistant that integrates with Ollama to provide intel
 - **LLM-Powered Tool Selection**: Natural language requests automatically mapped to appropriate tools
 - **Advanced Model Configuration**: Real-time parameter adjustment (temperature, tokens, etc.)
 - **Multiple Model Support**: Code models, chat models, and custom configurations
+- **Dynamic Model Switching**: Switch between models during conversation with live updates
 - **Conversation Management**: Export/import, history tracking, session statistics
+- **Vim Mode Input**: Full vim-style text editing with normal, insert, and command modes
+- **Response Control**: Stop response generation anytime with Ctrl+C without exiting
 
 ### 🛠️ System Tools
 - **Git Operations**: Status, commit, push, pull, branching, logs, diffs
@@ -65,6 +68,9 @@ cargo run
 # Or use a specific model
 cargo run -- chat --model codellama
 
+# Enable vim mode for enhanced text editing
+cargo run -- --vim
+
 # Execute a single command
 cargo run -- --execute "show system info"
 ```
@@ -80,12 +86,20 @@ cargo run
 # Example interactions:
 🤖 How can I help you?
 > set temperature to 0.8
+> switch to codellama          # Switch model during conversation
 > git status
 > create a rust project called my-app
 > search for rust tutorials
 > show memory usage
 > list docker containers
 > format this json: {"name":"test"}
+
+# During AI responses, press Ctrl+C to stop generation
+🤖 Generating response...
+Press Ctrl+C to stop response generation...
+[AI response text...]
+^C
+Response generation stopped by user
 ```
 
 ### Command Line Interface
@@ -156,15 +170,82 @@ The assistant supports real-time model parameter adjustment:
 > set temperature to 0.7
 > set max tokens to 4096
 > set top p to 0.9
-> show model config
-> switch to codellama
+> show model config              # Shows current model and parameters
+> switch to codellama            # Dynamic model switching (live updates)
+> use model llama2               # Alternative syntax
+> change model to qwen           # Another way to switch
+
+# Features:
+# - Live model switching during conversation
+# - Global configuration sync
+# - Automatic model validation
+# - Visual feedback and confirmation
+```
+
+### Vim Mode
+
+Enable vim-style text editing for enhanced input control:
+
+```bash
+# Start with vim mode enabled
+cargo run -- --vim
+
+# Or enable/disable during runtime
+cargo run -- chat --vim
+
+# Vim Mode Commands:
+# Normal Mode:
+#   i - Enter insert mode
+#   I - Insert at beginning of line
+#   a - Insert after cursor
+#   A - Insert at end of line
+#   o - Open new line below
+#   h,j,k,l - Move cursor
+#   0,$ - Move to beginning/end of line
+#   w,b - Move by word
+#   x,X - Delete character
+#   dd - Delete line
+#   u - Undo
+#   :q - Quit
+#   :help - Show help
+#   ESC - Return to normal mode
+#
+# Visual Features:
+#   - Highlighted cursor in normal mode (blue background, terminal cursor hidden)
+#   - Proper terminal cursor positioning in insert mode
+#   - Mode indicator shows current mode ([NORMAL], [INSERT], [COMMAND])
+#   - Cursor position always visible and accurately aligned
+#   - Clean cursor behavior: visual highlight in normal mode, terminal cursor in insert mode
+#   - Unicode and emoji support in prompts
+```
+
+### Response Control
+
+Control AI response generation with improved interrupt handling:
+
+```bash
+# During any AI response generation:
+Press Ctrl+C to stop response generation...
+[AI response text...]
+^C
+Response generation stopped by user
+
+# The application continues running - no exit
+🤖 How can I help you?
+> continue with next question
+
+# Features:
+# - Responsive Ctrl+C handling (checks every 50ms)
+# - Immediate interruption during token generation
+# - Preserves partial responses
+# - Session continues after interruption
 ```
 
 ### Tool Configuration
 
 Configure tool behavior through the configuration system:
 
-```toml
+```json
 # ~/.ollama_agent/config.json
 {
   "auto_approve_safe": true,
@@ -399,40 +480,6 @@ Define custom command shortcuts:
    # For package managers: Install npm, cargo, pip
    ```
 
-### Performance Optimization
-
-1. **Model Selection**: Use smaller models for simple tasks
-2. **Context Length**: Adjust context length based on needs
-3. **Tool Filtering**: Use specific commands to avoid unnecessary LLM parsing
-4. **Batch Operations**: Combine related operations when possible
-
-## 🤝 Contributing
-
-Contributions are welcome! Areas for improvement:
-
-- **New Tools**: Add support for additional development tools
-- **Model Support**: Enhance model-specific optimizations
-- **UI/UX**: Improve interactive experience
-- **Performance**: Optimize tool selection and execution
-- **Documentation**: Expand examples and tutorials
-
-### Development Setup
-
-```bash
-# Clone and setup development environment
-git clone <repository-url>
-cd ollama-agent
-cargo build
-cargo test
-
-# Run with verbose logging
-RUST_LOG=debug cargo run
-```
-
-## 📄 License
-
-[Your chosen license]
-
 ## 🙏 Acknowledgments
 
 - [Ollama](https://ollama.ai) for the excellent LLM runtime
@@ -441,6 +488,6 @@ RUST_LOG=debug cargo run
 
 ---
 
-**Start building with AI today!** 🚀
+> Note that this application gives a LLM access to system tools and should be used with caution, I'm not responsible for any damage that might be caused.
 
-For more examples and advanced usage, check out the [Wiki](link-to-wiki) or join our [Community](link-to-community).
+

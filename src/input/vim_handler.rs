@@ -69,7 +69,8 @@ impl VimInputHandler {
         self.mode = InputMode::Normal;
 
         let term = Term::stdout();
-        term.hide_cursor()?;
+        // Show cursor for better UX
+        term.show_cursor()?;
 
         self.display_prompt_with_mode(prompt, &term)?;
 
@@ -280,14 +281,59 @@ impl VimInputHandler {
             InputMode::Command => "[COMMAND]".yellow().bold(),
         };
 
-        print!("{} {} {}", mode_indicator, prompt, self.buffer);
+        let mode_text = match self.mode {
+            InputMode::Normal => "[NORMAL]",
+            InputMode::Insert => "[INSERT]",
+            InputMode::Command => "[COMMAND]",
+        };
 
-        // Position cursor
-        let prompt_len = strip_ansi_codes(prompt).len()
-            + strip_ansi_codes(&mode_indicator.to_string()).len()
-            + 2;
-        term.move_cursor_to(prompt_len + self.cursor_pos, term.size().0 as usize)?;
 
+        // Handle the buffer display based on mode
+        let buffer_display = if self.mode == InputMode::Normal {
+            if self.buffer.is_empty() {
+                " ".on_blue().to_string()
+            } else {
+                let chars: Vec<char> = self.buffer.chars().collect();
+                if self.cursor_pos < chars.len() {
+                    let cursor_char = chars[self.cursor_pos];
+                    let before: String = chars[..self.cursor_pos].iter().collect();
+                    let after: String = chars[self.cursor_pos + 1..].iter().collect();
+                    format!("{}{}{}", before, cursor_char.to_string().on_blue(), after)
+                } else {
+                    format!("{}{}", self.buffer, " ".on_blue())
+                }
+            }
+        } else {
+            self.buffer.clone()
+        };
+
+        // Print everything
+        print!("{} {} {}", mode_indicator, prompt, buffer_display);
+
+        // Handle cursor positioning based on mode
+        if self.mode == InputMode::Normal {
+            // In normal mode, hide the terminal cursor since we're using visual highlighting
+            term.hide_cursor()?;
+        } else {
+            // In insert and command modes, show and position the terminal cursor
+            term.show_cursor()?;
+            
+            // Position cursor more accurately
+            let mode_display_len = mode_text.chars().count();
+            let prompt_display_len = strip_ansi_codes(prompt).chars().count();
+            let prefix_len = mode_display_len + 1 + prompt_display_len + 1; // mode + space + prompt + space
+            
+            let cursor_pos = if self.mode == InputMode::Insert {
+                // In insert mode, cursor is between characters
+                prefix_len + self.cursor_pos
+            } else {
+                // Command mode
+                prefix_len + self.cursor_pos
+            };
+
+            // Use terminal's absolute column positioning
+            term.move_cursor_to(cursor_pos, term.size().0 as usize)?;
+        }
         io::stdout().flush()?;
         Ok(())
     }
@@ -296,6 +342,9 @@ impl VimInputHandler {
         term.clear_line()?;
         term.move_cursor_to(0, term.size().0 as usize)?;
         print!(":{}", self.command_buffer);
+        // Position cursor at end of command buffer
+        let cursor_pos = 1 + self.command_buffer.chars().count(); // Use chars().count() for proper Unicode handling
+        term.move_cursor_to(cursor_pos, term.size().0 as usize)?;
         io::stdout().flush()?;
         Ok(())
     }

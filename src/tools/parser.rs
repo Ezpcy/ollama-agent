@@ -55,181 +55,167 @@ impl NaturalLanguageParser {
         self.enhanced_fallback_parse(input)
     }
 
-    fn parse_immediate_commands(&self, input: &str) -> Option<AvailableTool> {
-        let binding = input.to_lowercase();
-        let lower = binding.trim();
-
-        // Model parameter commands
-        if lower.starts_with("set temperature") {
-            if let Some(temp_str) = lower.strip_prefix("set temperature") {
-                if let Ok(temp) = temp_str.trim().parse::<f64>() {
-                    return Some(AvailableTool::SetModelParameter {
-                        parameter: ModelParameter::Temperature,
-                        value: serde_json::Value::Number(
-                            serde_json::Number::from_f64(temp).unwrap(),
-                        ),
-                    });
-                }
-            }
-        }
-
-        if lower.starts_with("set max tokens") {
-            if let Some(tokens_str) = lower.strip_prefix("set max tokens") {
-                if let Ok(tokens) = tokens_str.trim().parse::<u64>() {
-                    return Some(AvailableTool::SetModelParameter {
-                        parameter: ModelParameter::MaxTokens,
-                        value: serde_json::Value::Number(serde_json::Number::from(tokens)),
-                    });
-                }
-            }
-        }
-
-        if lower == "show model config" || lower == "get model parameters" {
-            return Some(AvailableTool::GetModelParameter { parameter: None });
-        }
-
-        if lower.starts_with("switch to model") {
-            if let Some(model_name) = lower.strip_prefix("switch to model") {
-                return Some(AvailableTool::SwitchModel {
-                    model_name: model_name.trim().to_string(),
-                });
-            }
-        }
-
-        // Git shortcuts
-        if lower == "git status" {
-            return Some(AvailableTool::GitStatus {
-                repository_path: None,
-            });
-        }
-
-        if lower == "git log" {
-            return Some(AvailableTool::GitLog {
-                count: Some(10),
-                oneline: true,
-                repository_path: None,
-            });
-        }
-
-        // System shortcuts
-        if lower == "system info" {
-            return Some(AvailableTool::SystemInfo);
-        }
-
-        if lower == "memory usage" {
-            return Some(AvailableTool::MemoryUsage);
-        }
-
-        if lower == "disk usage" {
-            return Some(AvailableTool::DiskUsage { path: None });
-        }
-
-        // Clear conversation
-        if lower == "clear history" || lower == "clear conversation" {
-            return Some(AvailableTool::ClearHistory);
-        }
-
+    fn parse_immediate_commands(&self, _input: &str) -> Option<AvailableTool> {
+        // Remove all hardcoded patterns - let LLM handle everything
         None
     }
 
     fn build_enhanced_analysis_prompt(&self, user_input: &str) -> String {
         format!(
-            r#"Analyze this user request and determine which tools are needed. 
+            r#"You are an intelligent command parser that analyzes user requests and maps them to the appropriate tools.
 
-User request: "{}"
+USER REQUEST: "{}"
 
-Available tools (with examples):
+AVAILABLE TOOLS AND THEIR USAGE PATTERNS:
 
 ## File Operations
-- FileRead: read a file ("read Cargo.toml", "show me the main.rs file")
-- FileWrite: write content to a file ("write hello world to test.txt", "create a readme file")
-- FileEdit: edit an existing file ("add a line to main.rs", "replace function name in utils.rs")
-- FileSearch: search for files by name pattern ("find all .rs files", "search for config files")
-- ContentSearch: search for text within files ("find TODO comments", "search for function main")
-- ListDirectory: list files in a directory ("list files in src", "show current directory")
-- FileWatch: watch a file for changes ("watch config.json for changes")
+- FileRead: Read file content
+  Examples: "read Cargo.toml", "show main.rs", "what's in the config file", "display package.json"
+  Parameters: path (string, exact filename)
+
+- FileWrite: Write content to file
+  Examples: "write hello to test.txt", "create readme with content", "save data to file.json"
+  Parameters: path (string), content (string)
+
+- FileEdit: Edit existing file
+  Examples: "edit main.rs", "modify config", "update the dockerfile"
+  Parameters: path (string), operation (object)
+
+- FileSearch: Find files by pattern
+  Examples: "find *.rs files", "search for config files", "locate all json files"
+  Parameters: pattern (string), directory (optional string)
+
+- ContentSearch: Search text within files
+  Examples: "find TODO in code", "search for main function", "look for error messages"
+  Parameters: pattern (string), directory (optional string)
+
+- ListDirectory: List directory contents
+  Examples: "list files", "show directory", "what's in src/", "ls"
+  Parameters: path (string)
+
+- FileWatch: Monitor file changes
+  Examples: "watch config.json", "monitor Cargo.toml for 60 seconds", "watch the main.rs file for changes", "observe package.json for 2 minutes"
+  Parameters: path (string, exact filename), duration_seconds (optional number, convert minutes to seconds)
+  IMPORTANT: For "watch the X" format, extract X as the path, not "the"
 
 ## Git Operations
-- GitStatus: check git status
-- GitAdd: add files to git ("git add main.rs", "stage all changes")
-- GitCommit: create a commit ("commit with message 'fix bug'")
-- GitPush: push to remote ("push to origin", "push changes")
-- GitPull: pull from remote ("pull latest changes")
-- GitBranch: branch operations ("create branch feature-x", "switch to main", "list branches")
-- GitLog: show commit history ("show git log", "last 5 commits")
-- GitDiff: show changes ("show diff", "diff main.rs")
+- GitStatus: Check repository status
+  Examples: "git status", "check git", "repo status", "show changes"
+  Parameters: repository_path (optional string - OMIT unless user specifies a specific directory)
 
-## Web & API Operations
-- WebSearch: search the internet ("search for rust tutorials")
-- WebScrape: scrape content from URL ("scrape https://example.com")
-- HttpRequest: make HTTP requests ("GET request to api.example.com")
-- RestApiCall: REST API operations ("get users from api", "create user via api")
-- GraphQLQuery: GraphQL queries ("query users with GraphQL")
+- GitAdd: Stage files
+  Examples: "git add main.rs", "stage changes", "add all files", "stage everything"
+  Parameters: files (array of strings), repository_path (optional string - OMIT unless user specifies a specific directory)
 
-## Package Management
-- CargoOperation: Rust package operations ("cargo build", "cargo test", "add serde dependency")
-- NpmOperation: Node.js package operations ("npm install", "run dev script")
-- PipOperation: Python package operations ("pip install requests", "list packages")
+- GitCommit: Create commit
+  Examples: "commit changes", "git commit with message fix bug", "commit 'added feature'"
+  Parameters: message (string), repository_path (optional string - OMIT unless user specifies a specific directory)
+
+- GitPush: Push to remote
+  Examples: "push changes", "git push", "push to origin", "push to main branch"
+  Parameters: remote (optional string), branch (optional string), repository_path (optional string - OMIT unless user specifies a specific directory)
+
+- GitPull: Pull from remote
+  Examples: "pull changes", "git pull", "pull from origin", "update from remote"
+  Parameters: remote (optional string), branch (optional string), repository_path (optional string - OMIT unless user specifies a specific directory)
+
+- GitLog: Show commit history
+  Examples: "git log", "show commits", "last 5 commits", "commit history"
+  Parameters: count (optional number), oneline (boolean), repository_path (optional string - OMIT unless user specifies a specific directory)
 
 ## System Operations
-- ProcessList: list running processes ("show running processes")
-- SystemInfo: get system information
-- DiskUsage: check disk usage ("check disk space")
-- MemoryUsage: check memory usage
-- NetworkInfo: get network information
-- ExecuteCommand: run system commands ("run ls -la", "execute python script")
+- SystemInfo: Get system information
+  Examples: "system info", "system details", "show system", "hardware info"
+  Parameters: none
 
-## Docker Operations
-- DockerList: list docker resources ("list containers", "show docker images")
-- DockerRun: run a container ("run nginx container", "start postgres with port 5432")
-- DockerStop: stop a container ("stop container myapp")
-- DockerLogs: view container logs ("show logs for webapp")
+- MemoryUsage: Check memory usage
+  Examples: "memory usage", "check memory", "show ram", "memory info"
+  Parameters: none
 
-## Text Processing
-- JsonFormat: format JSON ("format this json", "pretty print json")
-- JsonQuery: query JSON data ("get user.name from json", "extract emails")
-- CsvParse: parse CSV data ("parse this csv", "convert csv to table")
-- RegexMatch: match with regex ("find emails in text", "match phone numbers")
-- TextTransform: transform text ("convert to uppercase", "trim whitespace")
+- DiskUsage: Check disk space
+  Examples: "disk usage", "check disk space", "storage info", "disk space in /home"
+  Parameters: path (optional string)
+
+- ProcessList: List running processes
+  Examples: "list processes", "show processes", "running apps", "ps aux"
+  Parameters: filter (optional string)
+
+- ExecuteCommand: Run system commands
+  Examples: "run ls -la", "execute python script.py", "command mkdir test"
+  Parameters: command (string)
 
 ## Model Configuration
-- SetModelParameter: change model settings ("set temperature to 0.8", "increase max tokens")
-- GetModelParameter: view model settings ("show temperature", "get model config")
-- SwitchModel: change the current model ("switch to llama2", "use codellama")
+- SetModelParameter: Change model settings
+  Examples: "set temperature to 0.8", "change max tokens to 2048", "set top-p to 0.9"
+  Parameters: parameter (enum), value (varies by parameter)
 
-## Project Management
-- CreateProject: create new projects ("create rust project myapp", "make python project")
-- ScheduleTask: schedule recurring tasks ("schedule daily backup")
-- ListScheduledTasks: view scheduled tasks
-- CancelScheduledTask: cancel a scheduled task
+- GetModelParameter: View model settings
+  Examples: "show model config", "get temperature", "display settings", "model parameters"
+  Parameters: parameter (optional enum)
+
+- SwitchModel: Change active model
+  Examples: "switch to llama2", "use codellama", "change model to gemma", "switch model"
+  Parameters: model_name (string)
+
+## Package Management
+- CargoOperation: Rust operations
+  Examples: "cargo build", "cargo test", "add serde", "build project"
+  Parameters: operation (enum), package (optional string), features (optional array)
+
+- NpmOperation: Node.js operations
+  Examples: "npm install", "npm run dev", "install express", "run tests"
+  Parameters: operation (enum), package (optional string), dev (boolean)
+
+## Web & API
+- WebSearch: Search internet
+  Examples: "search rust tutorials", "google python guides", "find documentation"
+  Parameters: query (string)
+
+- WebScrape: Extract web content
+  Examples: "scrape https://example.com", "get content from url", "extract webpage"
+  Parameters: url (string)
+
+- HttpRequest: Make HTTP requests
+  Examples: "GET api.example.com", "POST to webhook", "HTTP request to server"
+  Parameters: method (enum), url (string), headers (optional object), body (optional string)
+
+## Text Processing
+- JsonFormat: Format JSON
+  Examples: "format json", "pretty print json", "beautify json data"
+  Parameters: input (string)
+
+- RegexMatch: Pattern matching
+  Examples: "find emails in text", "match phone numbers", "extract urls"
+  Parameters: pattern (string), text (string), flags (optional string)
 
 ## Session Management
-- SetConfig: set configuration ("set auto-approve to true")
-- GetConfig: get configuration ("show config")
-- ExportConversation: export chat history ("export conversation to markdown")
-- ImportConversation: import chat history
-- ClearHistory: clear conversation history
+- ClearHistory: Clear conversation
+  Examples: "clear history", "clear conversation", "reset chat", "new session"
+  Parameters: none
 
-Respond ONLY with valid JSON in this exact format:
+PARSING RULES:
+1. Understand user intent, not just keywords
+2. Handle natural language variations and synonyms
+3. Extract parameters intelligently from context
+4. Convert time units (1 minute = 60 seconds)
+5. Preserve exact case for filenames (Cargo.toml, not cargo.toml)
+6. For "watch the X" format, the path is X, not "the"
+7. Use sensible defaults for optional parameters
+8. Handle multiple tools if the request is complex
+
+RESPONSE FORMAT (JSON only):
 {{
-  "reasoning": "Brief explanation of what the user wants",
+  "reasoning": "What the user wants to accomplish",
   "tools": [
     {{
       "tool_type": "ToolName",
       "parameters": {{
-        "param1": "value1",
-        "param2": "value2"
+        "param_name": "value"
       }},
       "reasoning": "Why this tool is needed"
     }}
   ]
 }}
-
-Consider:
-1. The user's intent and what they're trying to accomplish
-2. Multiple tools may be needed for complex requests
-3. Use sensible defaults for optional parameters
-4. Suggest the most specific tool for the task
 
 Analyze the request and respond with JSON only:"#,
             user_input
@@ -268,17 +254,31 @@ Analyze the request and respond with JSON only:"#,
             match tool_req.tool_type.as_str() {
                 // Existing tools
                 "FileRead" => {
-                    if let Some(path) = tool_req.parameters.get("path").and_then(|v| v.as_str()) {
+                    let path = tool_req.parameters.get("path")
+                        .or_else(|| tool_req.parameters.get("filename"))
+                        .or_else(|| tool_req.parameters.get("file"))
+                        .or_else(|| tool_req.parameters.get("filepath"))
+                        .and_then(|v| v.as_str());
+                    
+                    if let Some(path) = path {
                         tools.push(AvailableTool::FileRead {
                             path: path.to_string(),
                         });
                     }
                 }
                 "FileWrite" => {
-                    if let Some(path) = tool_req.parameters.get("path").and_then(|v| v.as_str()) {
+                    let path = tool_req.parameters.get("path")
+                        .or_else(|| tool_req.parameters.get("filename"))
+                        .or_else(|| tool_req.parameters.get("file"))
+                        .or_else(|| tool_req.parameters.get("filepath"))
+                        .and_then(|v| v.as_str());
+                    
+                    if let Some(path) = path {
                         let content = tool_req
                             .parameters
                             .get("content")
+                            .or_else(|| tool_req.parameters.get("text"))
+                            .or_else(|| tool_req.parameters.get("data"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
@@ -442,11 +442,14 @@ Analyze the request and respond with JSON only:"#,
                     tools.push(AvailableTool::GetModelParameter { parameter });
                 }
                 "SwitchModel" => {
-                    if let Some(model_name) = tool_req
+                    let model_name = tool_req
                         .parameters
                         .get("model_name")
-                        .and_then(|v| v.as_str())
-                    {
+                        .or_else(|| tool_req.parameters.get("model"))
+                        .or_else(|| tool_req.parameters.get("name"))
+                        .and_then(|v| v.as_str());
+                    
+                    if let Some(model_name) = model_name {
                         tools.push(AvailableTool::SwitchModel {
                             model_name: model_name.to_string(),
                         });
@@ -477,6 +480,51 @@ Analyze the request and respond with JSON only:"#,
                     tools.push(AvailableTool::ProcessList { filter });
                 }
 
+                // File watching
+                "FileWatch" => {
+                    // Try multiple parameter names for flexibility
+                    let path = tool_req.parameters.get("path")
+                        .or_else(|| tool_req.parameters.get("filename"))
+                        .or_else(|| tool_req.parameters.get("file"))
+                        .or_else(|| tool_req.parameters.get("filepath"))
+                        .and_then(|v| v.as_str());
+                    
+                    if let Some(path) = path {
+                        let duration_seconds = tool_req
+                            .parameters
+                            .get("duration_seconds")
+                            .or_else(|| tool_req.parameters.get("duration"))
+                            .or_else(|| tool_req.parameters.get("time"))
+                            .or_else(|| tool_req.parameters.get("seconds"))
+                            .and_then(|v| {
+                                // Handle different formats: "60s", "60", 60, "1 minute", "2 minutes"
+                                if let Some(s) = v.as_str() {
+                                    let s = s.trim().to_lowercase();
+                                    if s.ends_with(" minutes") || s.ends_with(" minute") {
+                                        s.split_whitespace().next()
+                                            .and_then(|num| num.parse::<u64>().ok())
+                                            .map(|n| n * 60)
+                                    } else if s.ends_with(" seconds") || s.ends_with(" second") {
+                                        s.split_whitespace().next()
+                                            .and_then(|num| num.parse::<u64>().ok())
+                                    } else if s.ends_with('s') {
+                                        s.trim_end_matches('s').parse::<u64>().ok()
+                                    } else if s.ends_with("min") {
+                                        s.trim_end_matches("min").parse::<u64>().ok().map(|n| n * 60)
+                                    } else {
+                                        s.parse::<u64>().ok()
+                                    }
+                                } else {
+                                    v.as_u64()
+                                }
+                            });
+                        tools.push(AvailableTool::FileWatch {
+                            path: path.to_string(),
+                            duration_seconds,
+                        });
+                    }
+                }
+
                 // Add more tool conversions here...
                 _ => {
                     println!(
@@ -491,119 +539,14 @@ Analyze the request and respond with JSON only:"#,
         tools
     }
 
-    fn enhanced_fallback_parse(&self, input: &str) -> Vec<AvailableTool> {
-        let lower = input.to_lowercase();
-        let mut tools = Vec::new();
-
-        // Enhanced keyword matching with better context understanding
-
-        // Git operations
-        if lower.contains("git") {
-            if lower.contains("status") {
-                tools.push(AvailableTool::GitStatus {
-                    repository_path: None,
-                });
-            } else if lower.contains("add") {
-                tools.push(AvailableTool::GitAdd {
-                    files: vec![".".to_string()],
-                    repository_path: None,
-                });
-            } else if lower.contains("commit") {
-                let message = if let Some(start) = lower.find("commit") {
-                    input[start..]
-                        .trim_start_matches("commit")
-                        .trim()
-                        .to_string()
-                } else {
-                    "Automated commit".to_string()
-                };
-                tools.push(AvailableTool::GitCommit {
-                    message,
-                    repository_path: None,
-                });
-            } else if lower.contains("push") {
-                tools.push(AvailableTool::GitPush {
-                    remote: None,
-                    branch: None,
-                    repository_path: None,
-                });
-            } else if lower.contains("pull") {
-                tools.push(AvailableTool::GitPull {
-                    remote: None,
-                    branch: None,
-                    repository_path: None,
-                });
-            }
-        }
-
-        // Model configuration fallback
-        if lower.contains("temperature") && (lower.contains("set") || lower.contains("change")) {
-            // Try to extract temperature value
-            if let Some(temp_match) = regex::Regex::new(r"(\d+\.?\d*)")
-                .ok()
-                .and_then(|re| re.find(&lower))
-            {
-                if let Ok(temp) = temp_match.as_str().parse::<f64>() {
-                    tools.push(AvailableTool::SetModelParameter {
-                        parameter: ModelParameter::Temperature,
-                        value: serde_json::Value::Number(
-                            serde_json::Number::from_f64(temp).unwrap(),
-                        ),
-                    });
-                }
-            }
-        }
-
-        // System info requests
-        if lower.contains("system") && (lower.contains("info") || lower.contains("information")) {
-            tools.push(AvailableTool::SystemInfo);
-        }
-
-        if lower.contains("memory") || lower.contains("ram") {
-            tools.push(AvailableTool::MemoryUsage);
-        }
-
-        if lower.contains("disk") && (lower.contains("space") || lower.contains("usage")) {
-            tools.push(AvailableTool::DiskUsage { path: None });
-        }
-
-        // Process management
-        if lower.contains("process") && lower.contains("list") {
-            tools.push(AvailableTool::ProcessList { filter: None });
-        }
-
-        // If no tools found, try original fallback
-        if tools.is_empty() {
-            tools = self.simple_fallback_parse(input);
-        }
-
-        tools
+    fn enhanced_fallback_parse(&self, _input: &str) -> Vec<AvailableTool> {
+        // Remove fallback parsing - let LLM handle everything
+        // If LLM fails, return empty vec to trigger general conversation
+        vec![]
     }
 
-    fn simple_fallback_parse(&self, input: &str) -> Vec<AvailableTool> {
-        let lower = input.to_lowercase();
-
-        if lower.contains("read") && (lower.contains("cargo") || lower.contains("toml")) {
-            return vec![AvailableTool::FileRead {
-                path: "Cargo.toml".to_string(),
-            }];
-        }
-
-        if lower.contains("list") && (lower.contains("directory") || lower.contains("files")) {
-            return vec![AvailableTool::ListDirectory {
-                path: ".".to_string(),
-            }];
-        }
-
-        if lower.contains("search") && !lower.contains("file") {
-            let query = input
-                .replace("search for", "")
-                .replace("search", "")
-                .trim()
-                .to_string();
-            return vec![AvailableTool::WebSearch { query }];
-        }
-
+    fn simple_fallback_parse(&self, _input: &str) -> Vec<AvailableTool> {
+        // Remove all fallback parsing - let LLM handle everything
         vec![]
     }
 

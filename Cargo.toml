@@ -1,5 +1,5 @@
 [package]
-name = "ollama-agent"
+name = "ollama-cli-assistant"
 version = "0.1.0"
 edition = "2021"
 
@@ -89,7 +89,7 @@ scheduling = []
 enhanced-crypto = []
 
 [[bin]]
-name = "ollama-agent"
+name = "ollama-cli-assistant"
 path = "src/main.rs"
 # test comment
 # another test

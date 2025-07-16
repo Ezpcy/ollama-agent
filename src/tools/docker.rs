@@ -378,7 +378,8 @@ impl ToolExecutor {
         tag: Option<String>,
         dockerfile: Option<String>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        let tag_name = tag.as_deref().unwrap_or("latest");
+        let tag_clone = tag.clone();
+        let tag_name = tag_clone.as_deref().unwrap_or("latest");
         println!(
             "{} Building Docker image: {}",
             "🔨".cyan(),
@@ -388,7 +389,7 @@ impl ToolExecutor {
         let mut cmd = Command::new("docker");
         cmd.args(["build"]);
 
-        if let Some(dockerfile_path) = dockerfile {
+        if let Some(ref dockerfile_path) = dockerfile {
             cmd.args(["-f", &dockerfile_path]);
         }
 
@@ -434,7 +435,7 @@ impl ToolExecutor {
 
         let mut cmd = Command::new("docker-compose");
 
-        if let Some(file) = compose_file {
+        if let Some(ref file) = compose_file {
             cmd.args(["-f", &file]);
         }
 

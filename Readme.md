@@ -1,6 +1,6 @@
 # 🤖 Advanced Ollama AI Assistant
 
-A powerful, extensible AI assistant that integrates with Ollama to provide intelligent system automation, development tools, and much more. This enhanced version includes advanced model parameter control, comprehensive tool support, and LLM-powered tool selection.
+A powerful, extensible AI assistant that integrates with Ollama to provide intelligent system automation, development tools, and much more. 
 
 ## ✨ Features
 
@@ -46,8 +46,8 @@ A powerful, extensible AI assistant that integrates with Ollama to provide intel
 
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd ollama-agent
+git clone https://github.com/Ezpcy/ollama-cli-assistant
+cd ollama-cli-assistant
 
 # Build the project
 cargo build --release

@@ -18,19 +18,19 @@ impl ToolExecutor {
         match operation {
             CargoOperation::Build => {
                 cmd.arg("build");
-                if let Some(features_list) = features {
+                if let Some(ref features_list) = features {
                     cmd.arg("--features").arg(features_list.join(","));
                 }
             }
             CargoOperation::Run => {
                 cmd.arg("run");
-                if let Some(features_list) = features {
+                if let Some(ref features_list) = features {
                     cmd.arg("--features").arg(features_list.join(","));
                 }
             }
             CargoOperation::Test => {
                 cmd.arg("test");
-                if let Some(features_list) = features {
+                if let Some(ref features_list) = features {
                     cmd.arg("--features").arg(features_list.join(","));
                 }
             }
@@ -54,7 +54,7 @@ impl ToolExecutor {
                 cmd.arg("add");
                 if let Some(pkg) = package {
                     cmd.arg(pkg);
-                    if let Some(features_list) = features {
+                    if let Some(ref features_list) = features {
                         cmd.arg("--features").arg(features_list.join(","));
                     }
                 } else {
@@ -169,7 +169,7 @@ impl ToolExecutor {
             NpmOperation::Audit => {
                 cmd.arg("audit");
             }
-            NpmOperation::Run { script } => {
+            NpmOperation::Run { ref script } => {
                 cmd.args(["run", &script]);
             }
             NpmOperation::List => {

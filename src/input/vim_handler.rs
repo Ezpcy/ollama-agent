@@ -272,7 +272,7 @@ impl VimInputHandler {
         term: &Term,
     ) -> Result<(), Box<dyn std::error::Error>> {
         term.clear_line()?;
-        term.move_cursor_to_column(0)?;
+        term.move_cursor_to(0, term.size().0 as usize)?;
 
         let mode_indicator = match self.mode {
             InputMode::Normal => "[NORMAL]".blue().bold(),
@@ -286,7 +286,7 @@ impl VimInputHandler {
         let prompt_len = strip_ansi_codes(prompt).len()
             + strip_ansi_codes(&mode_indicator.to_string()).len()
             + 2;
-        term.move_cursor_to_column(prompt_len + self.cursor_pos)?;
+        term.move_cursor_to(prompt_len + self.cursor_pos, term.size().0 as usize)?;
 
         io::stdout().flush()?;
         Ok(())
@@ -294,7 +294,7 @@ impl VimInputHandler {
 
     fn display_command_line(&self, term: &Term) -> Result<(), Box<dyn std::error::Error>> {
         term.clear_line()?;
-        term.move_cursor_to_column(0)?;
+        term.move_cursor_to(0, term.size().0 as usize)?;
         print!(":{}", self.command_buffer);
         io::stdout().flush()?;
         Ok(())
@@ -380,7 +380,7 @@ impl VimInputHandler {
 
     fn search_in_history(&mut self, term: &Term) -> Result<(), Box<dyn std::error::Error>> {
         term.clear_line()?;
-        term.move_cursor_to_column(0)?;
+        term.move_cursor_to(0, term.size().0 as usize)?;
         print!("/{}", self.search_buffer);
 
         loop {
@@ -392,7 +392,7 @@ impl VimInputHandler {
                         self.cursor_pos = self.buffer.len();
                     }
                     term.clear_line()?;
-                    term.move_cursor_to_column(0)?;
+                    term.move_cursor_to(0, term.size().0 as usize)?;
                     print!("/{}", self.search_buffer);
                 }
                 Key::Enter => {
@@ -407,7 +407,7 @@ impl VimInputHandler {
                     if !self.search_buffer.is_empty() {
                         self.search_buffer.pop();
                         term.clear_line()?;
-                        term.move_cursor_to_column(0)?;
+                        term.move_cursor_to(0, term.size().0 as usize)?;
                         print!("/{}", self.search_buffer);
                     }
                 }

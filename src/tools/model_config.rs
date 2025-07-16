@@ -286,7 +286,7 @@ impl ToolExecutor {
                     model_name,
                     available_models
                         .iter()
-                        .map(|m| &m.name)
+                        .map(|m| m.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", ")
                 )),

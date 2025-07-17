@@ -165,6 +165,32 @@ pub fn select_model(models: &[Model]) -> Result<SelectedModel, Box<dyn std::erro
     Ok(SelectedModel::from(models[selection].clone()))
 }
 
+pub async fn generate_response_silent(
+    model: &SelectedModel,
+    prompt: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let client = Client::new();
+
+    // Use enhanced request with current model configuration but without streaming
+    let request =
+        crate::tools::model_config::create_enhanced_request(model.get_name(), prompt, false);
+
+    let response = client
+        .post("http://localhost:11434/api/generate")
+        .json(&request)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(format!("API request failed: {}", response.status()).into());
+    }
+
+    let response_text = response.text().await?;
+    let ollama_response: OllamaResponse = serde_json::from_str(&response_text)?;
+    
+    Ok(ollama_response.response.unwrap_or_default())
+}
+
 pub async fn stream_response(
     model: &SelectedModel,
     prompt: &str,

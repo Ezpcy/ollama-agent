@@ -1,12 +1,19 @@
 use colored::Colorize;
 use std::time::Instant;
 
-use crate::client::{stream_response, SelectedModel};
+use crate::client::{generate_response_silent, stream_response, SelectedModel};
 use crate::input::VimInputHandler;
 use crate::tools::{
-    AvailableTool, ConversationEntry, NaturalLanguageParser, PermissionManager,
-    ToolExecutor, AsyncToolExecutor, ResourceLimits,
+    AsyncToolExecutor, AvailableTool, ConversationEntry, NaturalLanguageParser, PermissionManager,
+    ResourceLimits, ToolExecutor,
 };
+
+#[derive(Debug, Clone)]
+pub enum ResponseMode {
+    CommandGeneration,
+    ToolExecution(Vec<AvailableTool>),
+    GeneralConversation,
+}
 use crate::workspace::WorkspaceContext;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -37,9 +44,9 @@ impl AssistantSession {
     pub fn new(model: SelectedModel, tool_executor: ToolExecutor) -> Self {
         // Initialize the global config with the selected model
         Self::init_global_config(&model);
-        
+
         let async_executor = AsyncToolExecutor::new(ResourceLimits::default());
-        
+
         Self {
             model,
             tool_executor,
@@ -54,7 +61,11 @@ impl AssistantSession {
         }
     }
 
-    pub fn with_vim_mode(model: SelectedModel, tool_executor: ToolExecutor, vim_enabled: bool) -> Self {
+    pub fn with_vim_mode(
+        model: SelectedModel,
+        tool_executor: ToolExecutor,
+        vim_enabled: bool,
+    ) -> Self {
         let mut session = Self::new(model, tool_executor);
         if vim_enabled {
             session.vim_handler.enable_vim_mode();
@@ -286,23 +297,21 @@ impl AssistantSession {
         // Create context-aware prompt
         let context_prompt = self.create_context_aware_prompt(user_input);
 
-        // Check if command generation is enabled and if this might be a command request
-        let is_command_generation_enabled = self.tool_executor.is_command_generation_enabled().await.unwrap_or(false);
-        
-        if is_command_generation_enabled && self.should_generate_command(user_input) {
-            self.handle_command_generation_request(user_input).await?;
-        } else {
-            // Use LLM to analyze and determine tools
-            println!("{} Analyzing request with AI...", "🧠".cyan());
-            let tools = self
-                .parser
-                .parse_request_with_llm(&context_prompt, &self.model)
-                .await;
+        // Use LLM to analyze and determine the best response approach
+        println!("{} Analyzing request with AI...", "🧠".cyan());
+        let response_decision = self
+            .analyze_request_with_llm(&context_prompt, user_input)
+            .await?;
 
-            if tools.is_empty() {
-                self.handle_general_conversation(&context_prompt).await?;
-            } else {
+        match response_decision {
+            ResponseMode::CommandGeneration => {
+                self.handle_command_generation_request(user_input).await?;
+            }
+            ResponseMode::ToolExecution(tools) => {
                 self.handle_tool_request(&context_prompt, tools).await?;
+            }
+            ResponseMode::GeneralConversation => {
+                self.handle_general_conversation(&context_prompt).await?;
             }
         }
 
@@ -444,7 +453,9 @@ impl AssistantSession {
 
         // Add system prompt from config if available
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            if let Ok(system_prompt) = handle.block_on(async { self.tool_executor.get_system_prompt().await }) {
+            if let Ok(system_prompt) =
+                handle.block_on(async { self.tool_executor.get_system_prompt().await })
+            {
                 if let Some(prompt) = system_prompt {
                     context.push_str(&format!("System: {}\n\n", prompt));
                 }
@@ -481,7 +492,11 @@ impl AssistantSession {
         context
     }
 
-    fn build_tool_context(&self, user_input: &str, results: &[crate::tools::core::ToolResult]) -> String {
+    fn build_tool_context(
+        &self,
+        user_input: &str,
+        results: &[crate::tools::core::ToolResult],
+    ) -> String {
         let mut context = format!("User requested: {}\n\n", user_input);
 
         context.push_str("Tool execution results:\n");
@@ -546,27 +561,38 @@ impl AssistantSession {
 
     fn is_switch_model_command(&self, input: &str) -> bool {
         let lower = input.trim().to_lowercase();
-        lower.starts_with("switch to") || lower.starts_with("use model") || lower.starts_with("change model")
+        lower.starts_with("switch to")
+            || lower.starts_with("use model")
+            || lower.starts_with("change model")
     }
 
     fn is_performance_command(&self, input: &str) -> bool {
         let lower = input.trim().to_lowercase();
-        matches!(lower.as_str(), "performance" | "perf" | "metrics" | "show performance")
+        matches!(
+            lower.as_str(),
+            "performance" | "perf" | "metrics" | "show performance"
+        )
     }
 
     fn is_resource_usage_command(&self, input: &str) -> bool {
         let lower = input.trim().to_lowercase();
-        matches!(lower.as_str(), "resources" | "resource usage" | "usage" | "show resources")
+        matches!(
+            lower.as_str(),
+            "resources" | "resource usage" | "usage" | "show resources"
+        )
     }
 
     fn is_clear_logs_command(&self, input: &str) -> bool {
         let lower = input.trim().to_lowercase();
-        matches!(lower.as_str(), "clear logs" | "clear log" | "reset logs" | "clear metrics")
+        matches!(
+            lower.as_str(),
+            "clear logs" | "clear log" | "reset logs" | "clear metrics"
+        )
     }
 
     async fn handle_model_switch(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
         let lower = input.trim().to_lowercase();
-        
+
         let model_name = if let Some(name) = lower.strip_prefix("switch to ") {
             name.trim()
         } else if let Some(name) = lower.strip_prefix("use model ") {
@@ -579,16 +605,22 @@ impl AssistantSession {
 
         // Get available models
         let available_models = crate::client::fetch_models().await?;
-        
+
         // Find the model (support partial matching)
-        let matching_models: Vec<_> = available_models.iter()
+        let matching_models: Vec<_> = available_models
+            .iter()
             .filter(|m| m.name.to_lowercase().contains(model_name))
             .collect();
-        
+
         match matching_models.len() {
             0 => {
-                let available_names: Vec<String> = available_models.iter().map(|m| m.name.clone()).collect();
-                println!("{} Model '{}' not found. Available models:", "❌".red(), model_name);
+                let available_names: Vec<String> =
+                    available_models.iter().map(|m| m.name.clone()).collect();
+                println!(
+                    "{} Model '{}' not found. Available models:",
+                    "❌".red(),
+                    model_name
+                );
                 for name in available_names {
                     println!("  • {}", name.yellow());
                 }
@@ -596,37 +628,48 @@ impl AssistantSession {
             1 => {
                 let model = matching_models[0];
                 let old_model = self.model.name.clone();
-                
+
                 // Don't switch if it's the same model
                 if old_model == model.name {
                     println!("{} Already using model '{}'", "ℹ️".blue(), model.name);
                     return Ok(());
                 }
-                
+
                 // Update the global model config first
                 let result = self.tool_executor.switch_model(&model.name).await?;
-                
+
                 if result.success {
                     // Update the session's model
                     self.model = crate::client::SelectedModel::from(model.clone());
-                    
-                    println!("{} Successfully switched from '{}' to '{}'", 
-                            "✅".green(), old_model, model.name);
-                    
+
+                    println!(
+                        "{} Successfully switched from '{}' to '{}'",
+                        "✅".green(),
+                        old_model,
+                        model.name
+                    );
+
                     // Show brief model info
                     println!("{} Model ready for your next request", "🤖".cyan());
                 } else {
-                    return Err(result.error.unwrap_or("Unknown error switching model".to_string()).into());
+                    return Err(result
+                        .error
+                        .unwrap_or("Unknown error switching model".to_string())
+                        .into());
                 }
             }
             _ => {
-                println!("{} Multiple models match '{}'. Please be more specific:", "⚠️".yellow(), model_name);
+                println!(
+                    "{} Multiple models match '{}'. Please be more specific:",
+                    "⚠️".yellow(),
+                    model_name
+                );
                 for model in matching_models {
                     println!("  • {}", model.name.yellow());
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -748,8 +791,12 @@ impl AssistantSession {
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.workspace_context = Some(context.clone());
         self.workspace_files = files;
-        
-        println!("{} Added workspace context: {} files", "📁".cyan(), self.workspace_files.len());
+
+        println!(
+            "{} Added workspace context: {} files",
+            "📁".cyan(),
+            self.workspace_files.len()
+        );
         Ok(())
     }
 
@@ -763,107 +810,148 @@ impl AssistantSession {
         &self.workspace_files
     }
 
-    // Create context-aware prompt
-    fn should_generate_command(&self, user_input: &str) -> bool {
-        // Check for command generation keywords
-        let command_keywords = [
-            "initialize", "create", "run", "execute", "find", "search", "install",
-            "build", "compile", "test", "deploy", "start", "stop", "restart",
-            "setup", "configure", "clone", "pull", "push", "commit", "branch",
-            "list", "show", "display", "check", "verify", "download", "upload",
-            "generate", "make", "remove", "delete", "move", "copy", "rename",
-            "git", "npm", "cargo", "pip", "docker", "grep", "find", "ls", "cd",
-            "mkdir", "rmdir", "touch", "vim", "nano", "cat", "head", "tail",
-            "curl", "wget", "ssh", "scp", "rsync", "chmod", "chown", "ps", "kill",
-            "systemctl", "service", "crontab", "tar", "zip", "unzip", "gzip"
-        ];
-        
-        let input_lower = user_input.to_lowercase();
-        
-        // Check for direct command keywords
-        if command_keywords.iter().any(|&keyword| input_lower.contains(keyword)) {
-            return true;
+    // Analyze request with LLM to determine response mode
+    async fn analyze_request_with_llm(
+        &self,
+        context_prompt: &str,
+        user_input: &str,
+    ) -> Result<ResponseMode, Box<dyn std::error::Error>> {
+        let analysis_prompt = format!(
+            r#"You are an AI assistant that helps users with various tasks. Analyze the following user request and determine the most appropriate response mode.
+
+User request: "{}"
+
+Context: {}
+
+Response modes:
+1. COMMAND_GENERATION: Generate a specific command/script to be executed (e.g., "how do I create a next.js app?" should get a conversational explanation, not a command)
+2. TOOL_EXECUTION: Use available tools to perform actions (file operations, searches, etc.)
+3. GENERAL_CONVERSATION: Provide conversational response with explanations, tutorials, or information
+
+Guidelines:
+- Only use COMMAND_GENERATION if the user explicitly asks to "run", "execute", "generate command", or similar action-oriented requests
+- Questions starting with "how do I", "what is", "can you explain" should typically be GENERAL_CONVERSATION
+- Use TOOL_EXECUTION for file operations, searches, system information, etc.
+- When in doubt, prefer GENERAL_CONVERSATION for a better user experience
+
+Respond with only one of: COMMAND_GENERATION, TOOL_EXECUTION, or GENERAL_CONVERSATION"#,
+            user_input, context_prompt
+        );
+
+        let response = generate_response_silent(&self.model, &analysis_prompt).await?;
+        let decision = response.trim().to_uppercase();
+
+        let is_command_generation_enabled = self
+            .tool_executor
+            .is_command_generation_enabled()
+            .await
+            .unwrap_or(false);
+
+        match decision.as_str() {
+            "COMMAND_GENERATION" if is_command_generation_enabled => {
+                Ok(ResponseMode::CommandGeneration)
+            }
+            "TOOL_EXECUTION" => {
+                // Use existing tool parsing logic
+                let tools = self
+                    .parser
+                    .parse_request_with_llm(context_prompt, &self.model)
+                    .await;
+                if tools.is_empty() {
+                    Ok(ResponseMode::GeneralConversation)
+                } else {
+                    Ok(ResponseMode::ToolExecution(tools))
+                }
+            }
+            _ => Ok(ResponseMode::GeneralConversation),
         }
-        
-        // Check for project initialization patterns
-        if input_lower.contains("project") && 
-           (input_lower.contains("new") || input_lower.contains("create") || input_lower.contains("init")) {
-            return true;
-        }
-        
-        // Check for file/directory operations
-        if (input_lower.contains("file") || input_lower.contains("directory") || input_lower.contains("folder"))
-           && (input_lower.contains("find") || input_lower.contains("search") || input_lower.contains("list")) {
-            return true;
-        }
-        
-        // Check for system administration patterns
-        if input_lower.contains("system") || input_lower.contains("process") || input_lower.contains("service") {
-            return true;
-        }
-        
-        false
     }
 
-    async fn handle_command_generation_request(&mut self, user_input: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Create context-aware prompt
+
+    async fn handle_command_generation_request(
+        &mut self,
+        user_input: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         println!("{} Generating command for your request...", "🤖".cyan());
-        
+
         // Get workspace context as additional context
         let context = if let Some(workspace_context) = &self.workspace_context {
             Some(format!(
-                "Project: {} ({})", 
+                "Project: {} ({})",
                 workspace_context.root_path.display(),
-                workspace_context.project_type.as_deref().unwrap_or("unknown")
+                workspace_context
+                    .project_type
+                    .as_deref()
+                    .unwrap_or("unknown")
             ))
         } else {
             None
         };
 
         // Generate command using the tool executor
-        let generation_result = self.tool_executor.generate_command(user_input, context.as_deref()).await?;
-        
+        let generation_result = self
+            .tool_executor
+            .generate_command(user_input, context.as_deref())
+            .await?;
+
         if !generation_result.success {
-            println!("{} Failed to generate command: {}", "❌".red(), generation_result.error.unwrap_or("Unknown error".to_string()));
+            println!(
+                "{} Failed to generate command: {}",
+                "❌".red(),
+                generation_result
+                    .error
+                    .unwrap_or("Unknown error".to_string())
+            );
             return Ok(());
         }
 
         // Use the generated prompt to get a command from the LLM
         let command_prompt = generation_result.output;
         let generated_command = stream_response(&self.model, &command_prompt).await?;
-        
+
         // Clean up the response to get just the command
-        let clean_command = generated_command.trim()
+        let clean_command = generated_command
+            .trim()
             .lines()
             .find(|line| !line.trim().is_empty() && !line.starts_with("Command:"))
             .unwrap_or(generated_command.trim())
             .trim();
 
-        println!("{} Generated command: {}", "💡".yellow(), clean_command.cyan());
-        
+        println!(
+            "{} Generated command: {}",
+            "💡".yellow(),
+            clean_command.cyan()
+        );
+
         // Ask user if they want to execute it
-        use dialoguer::{Confirm, theme::ColorfulTheme};
+        use dialoguer::{theme::ColorfulTheme, Confirm};
         let should_execute = Confirm::with_theme(&ColorfulTheme::default())
             .with_prompt(format!("{} Execute this command?", "🚀".green()))
             .default(false)
             .interact()?;
-        
+
         if should_execute {
             // Execute the command
             let tool = AvailableTool::ExecuteCommand {
                 command: clean_command.to_string(),
             };
-            
+
             if self.permission_manager.request_permission(&tool)? {
                 println!("{} Executing command...", "⚡".cyan());
                 let result = self.tool_executor.execute_tool(tool).await?;
-                
+
                 if result.success {
                     println!("{} Command executed successfully!", "✅".green());
                     if !result.output.is_empty() {
                         println!("{}", result.output);
                     }
                 } else {
-                    println!("{} Command failed: {}", "❌".red(), result.error.unwrap_or("Unknown error".to_string()));
+                    println!(
+                        "{} Command failed: {}",
+                        "❌".red(),
+                        result.error.unwrap_or("Unknown error".to_string())
+                    );
                 }
             } else {
                 println!("{} Command execution denied", "🚫".red());
@@ -871,7 +959,7 @@ impl AssistantSession {
         } else {
             println!("{} Command execution cancelled", "🚫".yellow());
         }
-        
+
         // Create conversation entry
         let entry = ConversationEntry {
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -883,15 +971,15 @@ impl AssistantSession {
                 "executed": should_execute
             })),
         };
-        
+
         self.conversation_history.push(entry);
-        
+
         Ok(())
     }
 
     pub fn create_context_aware_prompt(&self, user_input: &str) -> String {
         let mut prompt = String::new();
-        
+
         // Add workspace context if available
         if let Some(context) = &self.workspace_context {
             prompt.push_str(&format!("Project context:\n"));
@@ -899,8 +987,11 @@ impl AssistantSession {
             if let Some(project_type) = &context.project_type {
                 prompt.push_str(&format!("- Project type: {}\n", project_type));
             }
-            prompt.push_str(&format!("- Files in context: {}\n\n", context.included_files.len()));
-            
+            prompt.push_str(&format!(
+                "- Files in context: {}\n\n",
+                context.included_files.len()
+            ));
+
             // Add file contents if not too many
             if self.workspace_files.len() <= 10 {
                 prompt.push_str("Relevant files:\n");
@@ -908,15 +999,18 @@ impl AssistantSession {
                     prompt.push_str(&format!("\n## {}\n```\n{}\n```\n", path.display(), content));
                 }
             } else {
-                prompt.push_str(&format!("Note: {} files are available in the workspace context.\n", self.workspace_files.len()));
+                prompt.push_str(&format!(
+                    "Note: {} files are available in the workspace context.\n",
+                    self.workspace_files.len()
+                ));
             }
-            
+
             prompt.push_str("\n---\n\n");
         }
-        
+
         // Add user input
         prompt.push_str(&format!("User request: {}", user_input));
-        
+
         prompt
     }
 }

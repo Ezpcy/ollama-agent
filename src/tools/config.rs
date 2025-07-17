@@ -20,6 +20,7 @@ pub struct AppConfig {
     pub custom_commands: HashMap<String, String>,
     pub system_prompt: Option<String>,
     pub enable_command_generation: bool,
+    pub enable_proactive_tool_mode: bool,
 }
 
 impl Default for AppConfig {
@@ -38,6 +39,7 @@ impl Default for AppConfig {
             custom_commands: HashMap::new(),
             system_prompt: None,
             enable_command_generation: true,
+            enable_proactive_tool_mode: true,
         }
     }
 }
@@ -201,6 +203,18 @@ impl ToolExecutor {
                     });
                 }
             }
+            "enable_proactive_tool_mode" => {
+                if let Some(val) = value.as_bool() {
+                    config.enable_proactive_tool_mode = val;
+                } else {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some("enable_proactive_tool_mode must be a boolean".to_string()),
+                        metadata: None,
+                    });
+                }
+            }
             _ => {
                 return Ok(ToolResult {
                     success: false,
@@ -242,6 +256,7 @@ impl ToolExecutor {
             Some("backup_enabled") => format!("backup_enabled: {}", config.backup_enabled),
             Some("system_prompt") => format!("system_prompt: {}", config.system_prompt.as_deref().unwrap_or("None")),
             Some("enable_command_generation") => format!("enable_command_generation: {}", config.enable_command_generation),
+            Some("enable_proactive_tool_mode") => format!("enable_proactive_tool_mode: {}", config.enable_proactive_tool_mode),
             Some(unknown_key) => {
                 return Ok(ToolResult {
                     success: false,
@@ -263,6 +278,7 @@ impl ToolExecutor {
                     backup_enabled: {}\n\
                     system_prompt: {}\n\
                     enable_command_generation: {}\n\
+                    enable_proactive_tool_mode: {}\n\
                     database_connections: {} configured\n\
                     api_keys: {} configured\n\
                     custom_commands: {} configured",
@@ -276,6 +292,7 @@ impl ToolExecutor {
                     config.backup_enabled,
                     config.system_prompt.as_deref().unwrap_or("None"),
                     config.enable_command_generation,
+                    config.enable_proactive_tool_mode,
                     config.database_connections.len(),
                     config.api_keys.len(),
                     config.custom_commands.len()
@@ -662,6 +679,11 @@ impl ToolExecutor {
     pub async fn is_command_generation_enabled(&self) -> Result<bool, Box<dyn std::error::Error>> {
         let config = self.load_config().await.unwrap_or_default();
         Ok(config.enable_command_generation)
+    }
+
+    pub async fn is_proactive_tool_mode_enabled(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        let config = self.load_config().await.unwrap_or_default();
+        Ok(config.enable_proactive_tool_mode)
     }
 
     fn conversation_to_html(&self, conversation: &[ConversationEntry]) -> String {

@@ -79,7 +79,7 @@ impl AssistantSession {
     }
 
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.show_welcome();
+        self.show_welcome().await;
 
         loop {
             let user_input = match self.get_user_input() {
@@ -129,6 +129,13 @@ impl AssistantSession {
                 continue;
             }
 
+            if self.is_toggle_tool_mode_command(&user_input) {
+                if let Err(e) = self.handle_toggle_tool_mode().await {
+                    println!("{} Error toggling tool mode: {}", "❌".red(), e);
+                }
+                continue;
+            }
+
             if let Err(e) = self.process_request(&user_input).await {
                 println!("{} {}", "Error processing request:".red(), e);
                 self.session_stats.failed_operations += 1;
@@ -147,7 +154,7 @@ impl AssistantSession {
         self.process_request(command).await
     }
 
-    fn show_welcome(&self) {
+    async fn show_welcome(&self) {
         println!(
             "{}",
             "🤖 Advanced AI Assistant with System Tools".cyan().bold()
@@ -162,21 +169,6 @@ impl AssistantSession {
             }
             .blue()
         );
-        println!();
-        println!("{}", "Enhanced Features:".blue().bold());
-        println!("  {} Advanced model parameter control", "•".blue());
-        println!("  {} Git repository management", "•".blue());
-        println!("  {} Docker container operations", "•".blue());
-        println!("  {} Package management (Cargo, NPM, Pip)", "•".blue());
-        println!(
-            "  {} Database operations (SQLite, PostgreSQL, MySQL)",
-            "•".blue()
-        );
-        println!("  {} System monitoring and information", "•".blue());
-        println!("  {} Text processing and analysis", "•".blue());
-        println!("  {} API calls and web scraping", "•".blue());
-        println!("  {} File watching and automation", "•".blue());
-        println!("  {} Configuration management", "•".blue());
         println!();
         println!("{}", "Special Commands:".blue().bold());
         println!("  {} Show session statistics", "stats".yellow());
@@ -194,6 +186,21 @@ impl AssistantSession {
             "{}",
             "Type your request naturally - I'll figure out what tools to use.".dimmed()
         );
+        
+        // Show proactive tool mode status
+        if let Ok(proactive_enabled) = self.tool_executor.is_proactive_tool_mode_enabled().await {
+            if proactive_enabled {
+                println!(
+                    "{}",
+                    "🔧 Proactive Tool Mode: ON - More likely to use tools for system queries".cyan()
+                );
+            } else {
+                println!(
+                    "{}",
+                    "💬 Proactive Tool Mode: OFF - Conservative tool usage".dimmed()
+                );
+            }
+        }
         println!();
     }
 
@@ -205,6 +212,7 @@ impl AssistantSession {
         println!("  {} {}", "•".blue(), "set temperature to 0.8");
         println!("  {} {}", "•".blue(), "show model config");
         println!("  {} {}", "•".blue(), "switch to codellama");
+        println!("  {} {}", "•".blue(), "toggle tool mode");
         println!();
 
         println!("{}", "Git Operations:".blue().bold());
@@ -332,7 +340,7 @@ impl AssistantSession {
         &mut self,
         user_input: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let context = self.build_conversation_context(user_input);
+        let context = self.build_conversation_context(user_input).await;
         let response = stream_response(&self.model, &context).await?;
 
         // Create conversation entry
@@ -346,10 +354,8 @@ impl AssistantSession {
 
         self.conversation_history.push(entry);
 
-        // Trim history if it gets too long
-        if self.conversation_history.len() > 20 {
-            self.conversation_history.drain(0..5);
-        }
+        // Implement proper memory management for conversation history
+        self.manage_conversation_history_memory();
 
         Ok(())
     }
@@ -419,6 +425,9 @@ impl AssistantSession {
             };
 
             self.conversation_history.push(entry);
+            
+            // Implement proper memory management for conversation history
+            self.manage_conversation_history_memory();
         }
 
         Ok(())
@@ -448,17 +457,13 @@ impl AssistantSession {
         }
     }
 
-    fn build_conversation_context(&self, user_input: &str) -> String {
+    async fn build_conversation_context(&self, user_input: &str) -> String {
         let mut context = String::new();
 
         // Add system prompt from config if available
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            if let Ok(system_prompt) =
-                handle.block_on(async { self.tool_executor.get_system_prompt().await })
-            {
-                if let Some(prompt) = system_prompt {
-                    context.push_str(&format!("System: {}\n\n", prompt));
-                }
+        if let Ok(system_prompt) = self.tool_executor.get_system_prompt().await {
+            if let Some(prompt) = system_prompt {
+                context.push_str(&format!("System: {}\n\n", prompt));
             }
         }
 
@@ -590,6 +595,14 @@ impl AssistantSession {
         )
     }
 
+    fn is_toggle_tool_mode_command(&self, input: &str) -> bool {
+        let lower = input.trim().to_lowercase();
+        matches!(
+            lower.as_str(),
+            "toggle tool mode" | "toggle tools" | "tool mode" | "proactive mode"
+        )
+    }
+
     async fn handle_model_switch(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
         let lower = input.trim().to_lowercase();
 
@@ -670,6 +683,32 @@ impl AssistantSession {
             }
         }
 
+        Ok(())
+    }
+
+    async fn handle_toggle_tool_mode(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let current_mode = self.tool_executor.is_proactive_tool_mode_enabled().await?;
+        let new_mode = !current_mode;
+        
+        self.tool_executor.set_config(
+            "enable_proactive_tool_mode", 
+            serde_json::Value::Bool(new_mode)
+        ).await?;
+        
+        let mode_text = if new_mode {
+            "🔧 Proactive Tool Mode: ON".cyan()
+        } else {
+            "💬 Proactive Tool Mode: OFF".dimmed()
+        };
+        
+        println!("{} Tool mode toggled: {}", "⚙️".cyan(), mode_text);
+        
+        if new_mode {
+            println!("{}", "   → More likely to use tools for system queries, file operations, and information gathering".dimmed());
+        } else {
+            println!("{}", "   → Conservative tool usage, prefer conversational responses".dimmed());
+        }
+        
         Ok(())
     }
 
@@ -816,8 +855,44 @@ impl AssistantSession {
         context_prompt: &str,
         user_input: &str,
     ) -> Result<ResponseMode, Box<dyn std::error::Error>> {
-        let analysis_prompt = format!(
-            r#"You are an AI assistant that helps users with various tasks. Analyze the following user request and determine the most appropriate response mode.
+        let is_proactive_tool_mode_enabled = self
+            .tool_executor
+            .is_proactive_tool_mode_enabled()
+            .await
+            .unwrap_or(false);
+
+        let analysis_prompt = if is_proactive_tool_mode_enabled {
+            format!(
+                r#"You are an AI assistant that helps users with various tasks. Analyze the following user request and determine the most appropriate response mode.
+
+User request: "{}"
+
+Context: {}
+
+Response modes:
+1. COMMAND_GENERATION: Generate a specific command/script to be executed
+2. TOOL_EXECUTION: Use available tools to perform actions (file operations, searches, system information, etc.)
+3. GENERAL_CONVERSATION: Provide conversational response with explanations, tutorials, or information
+
+PROACTIVE TOOL MODE is ENABLED. Guidelines:
+- STRONGLY PREFER TOOL_EXECUTION for any request that could potentially benefit from system tools
+- Use TOOL_EXECUTION for: system checks, file operations, searches, information gathering, status checks, package management, git operations, etc.
+- Examples that should use TOOL_EXECUTION:
+  * "check if hyprland is on my system" → TOOL_EXECUTION (check installed packages)
+  * "what's my system info" → TOOL_EXECUTION (system information)
+  * "list my files" → TOOL_EXECUTION (file listing)
+  * "check git status" → TOOL_EXECUTION (git operations)
+  * "is docker running" → TOOL_EXECUTION (system processes)
+  * "search for X in my files" → TOOL_EXECUTION (file search)
+- Only use GENERAL_CONVERSATION for pure explanations, tutorials, or when no tools could reasonably help
+- Only use COMMAND_GENERATION if the user explicitly asks to "run", "execute", "generate command", or similar action-oriented requests
+
+Respond with only one of: COMMAND_GENERATION, TOOL_EXECUTION, or GENERAL_CONVERSATION"#,
+                user_input, context_prompt
+            )
+        } else {
+            format!(
+                r#"You are an AI assistant that helps users with various tasks. Analyze the following user request and determine the most appropriate response mode.
 
 User request: "{}"
 
@@ -835,8 +910,9 @@ Guidelines:
 - When in doubt, prefer GENERAL_CONVERSATION for a better user experience
 
 Respond with only one of: COMMAND_GENERATION, TOOL_EXECUTION, or GENERAL_CONVERSATION"#,
-            user_input, context_prompt
-        );
+                user_input, context_prompt
+            )
+        };
 
         let response = generate_response_silent(&self.model, &analysis_prompt).await?;
         let decision = response.trim().to_uppercase();
@@ -973,8 +1049,51 @@ Respond with only one of: COMMAND_GENERATION, TOOL_EXECUTION, or GENERAL_CONVERS
         };
 
         self.conversation_history.push(entry);
+        
+        // Implement proper memory management for conversation history
+        self.manage_conversation_history_memory();
 
         Ok(())
+    }
+
+    fn manage_conversation_history_memory(&mut self) {
+        const MAX_HISTORY_SIZE: usize = 50;
+        const TRIM_TO_SIZE: usize = 30;
+        const MAX_RESPONSE_LENGTH: usize = 1000;
+        
+        // Check if we need to trim history
+        if self.conversation_history.len() > MAX_HISTORY_SIZE {
+            // Remove oldest entries, keeping the most recent ones
+            let remove_count = self.conversation_history.len() - TRIM_TO_SIZE;
+            self.conversation_history.drain(0..remove_count);
+        }
+        
+        // Trim excessively long responses to save memory
+        for entry in &mut self.conversation_history {
+            if entry.assistant_response.len() > MAX_RESPONSE_LENGTH {
+                entry.assistant_response.truncate(MAX_RESPONSE_LENGTH);
+                entry.assistant_response.push_str("... [truncated]");
+            }
+        }
+        
+        // Calculate approximate memory usage
+        let total_memory: usize = self.conversation_history.iter()
+            .map(|entry| {
+                entry.user_input.len() + 
+                entry.assistant_response.len() + 
+                entry.tools_used.iter().map(|tool| tool.len()).sum::<usize>()
+            })
+            .sum();
+        
+        // If memory usage is still too high, be more aggressive
+        const MAX_MEMORY_BYTES: usize = 100_000; // ~100KB
+        if total_memory > MAX_MEMORY_BYTES {
+            let target_size = std::cmp::max(TRIM_TO_SIZE / 2, 10);
+            if self.conversation_history.len() > target_size {
+                let remove_count = self.conversation_history.len() - target_size;
+                self.conversation_history.drain(0..remove_count);
+            }
+        }
     }
 
     pub fn create_context_aware_prompt(&self, user_input: &str) -> String {

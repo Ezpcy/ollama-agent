@@ -327,7 +327,20 @@ impl ToolExecutor {
     pub fn file_read(&self, path: &str) -> Result<ToolResult, Box<dyn std::error::Error>> {
         println!("{} Reading file: {}", "📖".cyan(), path.yellow());
 
-        match fs::read_to_string(path) {
+        // Validate path to prevent directory traversal
+        let validated_path = match self.validate_path(path) {
+            Ok(path) => path,
+            Err(error) => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(error),
+                    metadata: None,
+                });
+            }
+        };
+
+        match fs::read_to_string(&validated_path) {
             Ok(content) => Ok(ToolResult {
                 success: true,
                 output: content,
@@ -350,11 +363,24 @@ impl ToolExecutor {
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
         println!("{} Writing to file: {}", "✏️".cyan(), path.yellow());
 
-        if let Some(parent) = Path::new(path).parent() {
+        // Validate path to prevent directory traversal
+        let validated_path = match self.validate_path(path) {
+            Ok(path) => path,
+            Err(error) => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(error),
+                    metadata: None,
+                });
+            }
+        };
+
+        if let Some(parent) = validated_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        match fs::write(path, content) {
+        match fs::write(&validated_path, content) {
             Ok(_) => Ok(ToolResult {
                 success: true,
                 output: format!("Successfully wrote {} bytes to {}", content.len(), path),
@@ -542,11 +568,125 @@ impl ToolExecutor {
         })
     }
 
+    fn validate_command(&self, command: &str) -> Result<(), String> {
+        // Check for dangerous patterns that could lead to command injection
+        let dangerous_patterns = [
+            "|", "&&", "||", ";", "`", "$(", "&", ">", "<", ">>", "<<",
+            "rm -rf /", "rm -rf /*", ":(){ :|:& };:", "curl", "wget", "nc", "netcat"
+        ];
+        
+        // Check for SQL injection patterns
+        let sql_patterns = [
+            "DROP TABLE", "DELETE FROM", "UPDATE", "INSERT INTO", "CREATE TABLE", "ALTER TABLE"
+        ];
+        
+        // Check for path traversal patterns
+        let path_patterns = [
+            "../", "..\\", "/etc/", "/var/", "/usr/", "/home/", "C:\\", "~/"
+        ];
+        
+        let command_lower = command.to_lowercase();
+        
+        // Check dangerous command patterns
+        for pattern in &dangerous_patterns {
+            if command_lower.contains(pattern) {
+                return Err(format!("Command contains potentially dangerous pattern: {}", pattern));
+            }
+        }
+        
+        // Check SQL injection patterns
+        for pattern in &sql_patterns {
+            if command_lower.contains(&pattern.to_lowercase()) {
+                return Err(format!("Command contains SQL injection pattern: {}", pattern));
+            }
+        }
+        
+        // Check path traversal patterns
+        for pattern in &path_patterns {
+            if command_lower.contains(pattern) {
+                return Err(format!("Command contains path traversal pattern: {}", pattern));
+            }
+        }
+        
+        // Check for excessively long commands (potential buffer overflow)
+        if command.len() > 1000 {
+            return Err("Command is too long (potential buffer overflow)".to_string());
+        }
+        
+        // Check for non-printable characters
+        if command.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
+            return Err("Command contains non-printable characters".to_string());
+        }
+        
+        Ok(())
+    }
+
+    fn validate_path(&self, path: &str) -> Result<std::path::PathBuf, String> {
+        use std::path::{Path, PathBuf};
+        
+        // Check for obviously malicious patterns
+        if path.contains("..") || path.contains("~") {
+            return Err("Path contains directory traversal patterns".to_string());
+        }
+        
+        // Check for access to sensitive directories
+        let sensitive_dirs = [
+            "/etc", "/var", "/usr", "/boot", "/sys", "/proc", "/dev",
+            "/root", "/home", "C:\\", "C:\\Windows", "C:\\Program Files"
+        ];
+        
+        for sensitive_dir in &sensitive_dirs {
+            if path.starts_with(sensitive_dir) {
+                return Err(format!("Access to sensitive directory {} is not allowed", sensitive_dir));
+            }
+        }
+        
+        // Canonicalize the path to resolve any remaining traversal attempts
+        let path_obj = Path::new(path);
+        let canonical_path = match path_obj.canonicalize() {
+            Ok(p) => p,
+            Err(_) => {
+                // If canonicalization fails, check if parent exists and create safe path
+                let parent = path_obj.parent();
+                if let Some(parent) = parent {
+                    if let Ok(parent_canonical) = parent.canonicalize() {
+                        parent_canonical.join(path_obj.file_name().unwrap_or_default())
+                    } else {
+                        return Err("Invalid path or parent directory".to_string());
+                    }
+                } else {
+                    return Err("Invalid path".to_string());
+                }
+            }
+        };
+        
+        // Get current working directory for relative path validation
+        let current_dir = std::env::current_dir()
+            .map_err(|_| "Cannot determine current directory")?;
+        
+        // Ensure the canonical path is within the current directory or its subdirectories
+        if !canonical_path.starts_with(&current_dir) {
+            return Err("Path is outside of allowed directory scope".to_string());
+        }
+        
+        Ok(canonical_path)
+    }
+
     pub async fn execute_command(
         &self,
         command: &str,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
         println!("{} Executing command: {}", "⚡".cyan(), command.yellow());
+
+        // Security validation: Check for dangerous patterns
+        if let Err(validation_error) = self.validate_command(command) {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(validation_error),
+                metadata: None,
+            });
+        }
 
         // Check if we're in a TTY environment
         let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());

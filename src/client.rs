@@ -82,6 +82,7 @@ impl SelectedModel {
             || self.name.to_lowercase().contains("starcoder")
     }
 
+
 }
 
 #[derive(Serialize, Debug)]

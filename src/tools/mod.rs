@@ -10,6 +10,7 @@ pub mod config;
 pub mod database;
 pub mod discovery;
 pub mod docker;
+pub mod enhanced;
 pub mod enhanced_errors;
 pub mod errors;
 pub mod git;

@@ -164,6 +164,19 @@ pub enum AvailableTool {
     },
     MemoryUsage,
     NetworkInfo,
+    SystemPackageManager {
+        operation: PackageManagerOperation,
+        package: Option<String>,
+    },
+    ServiceManager {
+        operation: ServiceOperation,
+        service_name: String,
+    },
+    EnvironmentInfo,
+    NetworkScan {
+        target: String,
+        scan_type: NetworkScanType,
+    },
 
     // Docker Operations
     DockerList {
@@ -245,6 +258,24 @@ pub enum AvailableTool {
     ListScheduledTasks,
     CancelScheduledTask {
         name: String,
+    },
+    ParallelExecution {
+        tools: Vec<AvailableTool>,
+    },
+    SmartSuggestion {
+        context: String,
+        current_goal: String,
+    },
+    PerformanceMonitor {
+        operation: MonitorOperation,
+    },
+    CodeAnalysis {
+        path: String,
+        analysis_type: CodeAnalysisType,
+    },
+    SecurityScan {
+        target: String,
+        scan_depth: SecurityScanDepth,
     },
 }
 
@@ -378,6 +409,62 @@ pub enum ExportFormat {
     Markdown,
     Text,
     Html,
+}
+
+#[derive(Debug, Clone)]
+pub enum PackageManagerOperation {
+    Install,
+    Remove,
+    Update,
+    Search,
+    List,
+    Info,
+    CheckInstalled,
+}
+
+#[derive(Debug, Clone)]
+pub enum ServiceOperation {
+    Start,
+    Stop,
+    Restart,
+    Status,
+    Enable,
+    Disable,
+    List,
+}
+
+#[derive(Debug, Clone)]
+pub enum NetworkScanType {
+    Port,
+    Ping,
+    Discovery,
+    Traceroute,
+}
+
+#[derive(Debug, Clone)]
+pub enum MonitorOperation {
+    Start,
+    Stop,
+    Status,
+    Report,
+}
+
+#[derive(Debug, Clone)]
+pub enum CodeAnalysisType {
+    Complexity,
+    Dependencies,
+    Security,
+    Performance,
+    Documentation,
+    TestCoverage,
+}
+
+#[derive(Debug, Clone)]
+pub enum SecurityScanDepth {
+    Quick,
+    Standard,
+    Deep,
+    Compliance,
 }
 
 // Tool executor
@@ -644,6 +731,35 @@ impl ToolExecutor {
             }
             AvailableTool::ListScheduledTasks => self.list_scheduled_tasks().await,
             AvailableTool::CancelScheduledTask { name } => self.cancel_scheduled_task(&name).await,
+
+            // Enhanced system operations
+            AvailableTool::SystemPackageManager { operation, package } => {
+                self.system_package_manager(operation, package.as_deref()).await
+            }
+            AvailableTool::ServiceManager { operation, service_name } => {
+                self.service_manager(operation, &service_name).await
+            }
+            AvailableTool::EnvironmentInfo => self.environment_info().await,
+            AvailableTool::NetworkScan { target, scan_type } => {
+                self.network_scan(&target, scan_type).await
+            }
+
+            // Enhanced advanced operations
+            AvailableTool::ParallelExecution { tools } => {
+                self.parallel_execution(tools).await
+            }
+            AvailableTool::SmartSuggestion { context, current_goal } => {
+                self.smart_suggestion(&context, &current_goal).await
+            }
+            AvailableTool::PerformanceMonitor { operation } => {
+                self.performance_monitor(operation).await
+            }
+            AvailableTool::CodeAnalysis { path, analysis_type } => {
+                self.code_analysis(&path, analysis_type).await
+            }
+            AvailableTool::SecurityScan { target, scan_depth } => {
+                self.security_scan(&target, scan_depth).await
+            }
         }
     }
 }

@@ -332,7 +332,7 @@ impl AssistantSession {
         &mut self,
         user_input: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let context = self.build_conversation_context(user_input);
+        let context = self.build_conversation_context(user_input).await;
         let response = stream_response(&self.model, &context).await?;
 
         // Create conversation entry
@@ -448,17 +448,13 @@ impl AssistantSession {
         }
     }
 
-    fn build_conversation_context(&self, user_input: &str) -> String {
+    async fn build_conversation_context(&self, user_input: &str) -> String {
         let mut context = String::new();
 
         // Add system prompt from config if available
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            if let Ok(system_prompt) =
-                handle.block_on(async { self.tool_executor.get_system_prompt().await })
-            {
-                if let Some(prompt) = system_prompt {
-                    context.push_str(&format!("System: {}\n\n", prompt));
-                }
+        if let Ok(system_prompt) = self.tool_executor.get_system_prompt().await {
+            if let Some(prompt) = system_prompt {
+                context.push_str(&format!("System: {}\n\n", prompt));
             }
         }
 

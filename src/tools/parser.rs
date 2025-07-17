@@ -1,6 +1,6 @@
 use super::core::{
     AvailableTool, HttpMethod, ModelParameter, TextOperation, ExportFormat,
-    CargoOperation, NpmOperation, PipOperation, DockerResourceType,
+    CargoOperation, NpmOperation, PipOperation, DockerResourceType, EditOperation,
 };
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -289,6 +289,56 @@ Analyze the request and respond with JSON only:"#,
                         });
                     }
                 }
+                "FileEdit" => {
+                    let path = tool_req.parameters.get("path")
+                        .or_else(|| tool_req.parameters.get("filename"))
+                        .or_else(|| tool_req.parameters.get("file"))
+                        .or_else(|| tool_req.parameters.get("filepath"))
+                        .and_then(|v| v.as_str());
+
+                    if let Some(path) = path {
+                        if let Some(op_val) = tool_req.parameters.get("operation") {
+                            if let Some(op_obj) = op_val.as_object() {
+                                if let Some(op_type) = op_obj.get("type").and_then(|v| v.as_str()) {
+                                    let operation = match op_type.to_lowercase().as_str() {
+                                        "replace" => {
+                                            let old = op_obj.get("old").and_then(|v| v.as_str()).unwrap_or("");
+                                            let new = op_obj.get("new").and_then(|v| v.as_str()).unwrap_or("");
+                                            EditOperation::Replace { old: old.to_string(), new: new.to_string() }
+                                        }
+                                        "insert" => {
+                                            let line = op_obj.get("line").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+                                            let content = op_obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                            EditOperation::Insert { line, content: content.to_string() }
+                                        }
+                                        "append" => {
+                                            let content = op_obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                            EditOperation::Append { content: content.to_string() }
+                                        }
+                                        "delete" => {
+                                            let line_start = op_obj.get("line_start")
+                                                .or_else(|| op_obj.get("line"))
+                                                .and_then(|v| v.as_u64())
+                                                .unwrap_or(1) as usize;
+                                            let line_end = op_obj.get("line_end")
+                                                .and_then(|v| v.as_u64())
+                                                .map(|n| n as usize);
+                                            EditOperation::Delete { line_start, line_end }
+                                        }
+                                        _ => {
+                                            EditOperation::Append { content: op_obj.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string() }
+                                        }
+                                    };
+
+                                    tools.push(AvailableTool::FileEdit {
+                                        path: path.to_string(),
+                                        operation,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
                 "WebSearch" => {
                     if let Some(query) = tool_req.parameters.get("query").and_then(|v| v.as_str()) {
                         tools.push(AvailableTool::WebSearch {
@@ -558,7 +608,23 @@ Analyze the request and respond with JSON only:"#,
                         });
                     }
                 }
-                
+                "GenerateCommand" => {
+                    let user_req = tool_req.parameters.get("request")
+                        .or_else(|| tool_req.parameters.get("prompt"))
+                        .or_else(|| tool_req.parameters.get("description"))
+                        .or_else(|| tool_req.parameters.get("task"))
+                        .or_else(|| tool_req.parameters.get("text"))
+                        .and_then(|v| v.as_str());
+
+                    if let Some(user_request) = user_req {
+                        let context = tool_req.parameters.get("context").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        tools.push(AvailableTool::GenerateCommand {
+                            user_request: user_request.to_string(),
+                            context,
+                        });
+                    }
+                }
+
                 // Project operations
                 "CreateProject" => {
                     if let Some(name) = tool_req.parameters.get("name").and_then(|v| v.as_str()) {

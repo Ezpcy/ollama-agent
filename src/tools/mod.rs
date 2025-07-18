@@ -4,23 +4,21 @@ pub mod parser;
 pub mod permissions;
 
 // New modules
-pub mod api;
+pub mod advanced;
 pub mod async_executor;
 pub mod config;
-pub mod database;
+pub mod database_api;
 pub mod discovery;
 pub mod docker;
-pub mod enhanced;
 pub mod enhanced_errors;
 pub mod errors;
 pub mod git;
 pub mod history;
 pub mod logging;
 pub mod model_config;
-pub mod package;
+pub mod package_management;
 pub mod search;
 pub mod system;
-pub mod text;
 
 // Re-export everything from core for convenience
 pub use core::*;

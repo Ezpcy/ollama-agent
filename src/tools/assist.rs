@@ -249,12 +249,9 @@ impl AssistantSession {
         // Use the existing streaming function but capture the response
         let mut response = String::new();
 
-        // For now, we'll use a simple implementation
-        // In a full implementation, you'd integrate with your streaming LLM function
-        stream_response_for_context(&self.model, context).await?;
-
-        // Placeholder return - in real implementation, capture the streamed response
-        Ok("Response generated successfully".to_string())
+        // Use the streaming LLM function to generate response
+        let response = stream_response_for_context(&self.model, context).await?;
+        Ok(response)
     }
 
     fn get_user_input(&self) -> Result<String, Box<dyn std::error::Error>> {
@@ -278,12 +275,59 @@ async fn stream_response_for_context(
     model: &SelectedModel,
     context: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    // Implementation similar to your existing stream_response function
-    // but adapted to work with context and return the response string
+    use crate::client::make_ollama_request;
+    use serde_json::json;
+    use std::io::{self, Write};
+    
+    println!("🤖 Generating response based on context and tool results...\n");
 
-    // For now, just print a placeholder
-    println!("Generating response based on context and tool results...");
+    let request_body = json!({
+        "model": model.name,
+        "prompt": context,
+        "stream": true,
+        "options": {
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "top_k": 40
+        }
+    });
 
-    // TODO: Integrate with your existing streaming LLM function
-    Ok(String::new())
+    let mut response_text = String::new();
+    
+    match make_ollama_request("/api/generate", &request_body).await {
+        Ok(mut response) => {
+            let mut buffer = Vec::new();
+            
+            while let Some(chunk) = response.chunk().await? {
+                buffer.extend_from_slice(&chunk);
+                
+                // Process complete lines
+                while let Some(newline_pos) = buffer.iter().position(|&b| b == b'\n') {
+                    let line = buffer.drain(..=newline_pos).collect::<Vec<_>>();
+                    let line_str = String::from_utf8_lossy(&line[..line.len()-1]); // Remove newline
+                    
+                    if !line_str.trim().is_empty() {
+                        if let Ok(json_obj) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                            if let Some(response_part) = json_obj["response"].as_str() {
+                                print!("{}", response_part);
+                                io::stdout().flush().unwrap();
+                                response_text.push_str(response_part);
+                            }
+                            
+                            if json_obj["done"].as_bool().unwrap_or(false) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            println!(); // Add final newline
+            Ok(response_text)
+        }
+        Err(e) => {
+            println!("Error generating response: {}", e);
+            Err(e)
+        }
+    }
 }

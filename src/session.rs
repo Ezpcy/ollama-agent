@@ -113,8 +113,7 @@ impl AssistantSession {
             }
 
             if self.is_performance_command(&user_input) {
-                // TODO: Implement performance summary display
-                println!("Performance summary not yet implemented");
+                self.display_performance_summary().await;
                 continue;
             }
 
@@ -506,8 +505,10 @@ impl AssistantSession {
 
         context.push_str("Tool execution results:\n");
         for (i, result) in results.iter().enumerate() {
-            let preview = if result.output.len() > 800 {
-                format!("{}...", &result.output[..800])
+            let preview = if result.output.chars().count() > 800 {
+                // Truncate at character boundary, not byte boundary
+                let truncated: String = result.output.chars().take(800).collect();
+                format!("{}...", truncated)
             } else {
                 result.output.clone()
             };
@@ -849,6 +850,49 @@ impl AssistantSession {
         &self.workspace_files
     }
 
+    // Display performance summary
+    async fn display_performance_summary(&self) {
+        use colored::Colorize;
+        
+        println!("{}", "📊 Performance Summary".cyan().bold());
+        println!("{}", "─".repeat(50).blue());
+
+        // Get resource usage
+        let usage = self.async_executor.get_resource_usage().await;
+        
+        // Display current session metrics
+        let conversation_count = self.conversation_history.len();
+        let total_tokens = self.conversation_history.iter()
+            .filter_map(|entry| entry.metadata.as_ref())
+            .filter_map(|metadata| metadata.get("total_tokens"))
+            .filter_map(|tokens| tokens.as_u64())
+            .sum::<u64>();
+
+        println!("📈 Session Statistics:");
+        println!("  • Conversation entries: {}", conversation_count.to_string().green());
+        println!("  • Total tokens processed: {}", total_tokens.to_string().green());
+        println!("  • Workspace files tracked: {}", self.workspace_files.len().to_string().green());
+        
+        println!();
+        println!("🔧 Resource Usage:");
+        usage.display();
+        
+        // Performance recommendations
+        println!();
+        println!("💡 Performance Tips:");
+        if conversation_count > 100 {
+            println!("  • Consider clearing conversation history for better performance");
+        }
+        if self.workspace_files.len() > 50 {
+            println!("  • Large workspace - consider focusing on specific directories");
+        }
+        if total_tokens > 50000 {
+            println!("  • High token usage - monitor model context limits");
+        }
+        
+        println!("{}", "─".repeat(50).blue());
+    }
+
     // Analyze request with LLM to determine response mode
     async fn analyze_request_with_llm(
         &self,
@@ -886,6 +930,8 @@ PROACTIVE TOOL MODE is ENABLED. Guidelines:
   * "search for X in my files" → TOOL_EXECUTION (file search)
 - Only use GENERAL_CONVERSATION for pure explanations, tutorials, or when no tools could reasonably help
 - Only use COMMAND_GENERATION if the user explicitly asks to "run", "execute", "generate command", or similar action-oriented requests
+
+CRITICAL: Do not provide conversational responses like "As an AI I can't do that" for requests that can be handled with tools. Always try TOOL_EXECUTION first.
 
 Respond with only one of: COMMAND_GENERATION, TOOL_EXECUTION, or GENERAL_CONVERSATION"#,
                 user_input, context_prompt
@@ -975,12 +1021,42 @@ Respond with only one of: COMMAND_GENERATION, TOOL_EXECUTION, or GENERAL_CONVERS
             }
         }
         
-        // Strategy 3: For "list files" and similar requests, if we don't find a clear decision,
-        // default to TOOL_EXECUTION since these are clearly tool-oriented requests
+        // Strategy 3: Enhanced heuristic detection for common tool-oriented requests
         let input_lower = response.to_lowercase();
+        
+        // File operations
         if input_lower.contains("list") || input_lower.contains("files") || 
            input_lower.contains("directory") || input_lower.contains("folder") ||
-           input_lower.contains("show") || input_lower.contains("display") {
+           input_lower.contains("show") || input_lower.contains("display") ||
+           input_lower.contains("read") || input_lower.contains("write") ||
+           input_lower.contains("search") || input_lower.contains("find") {
+            return "TOOL_EXECUTION".to_string();
+        }
+        
+        // System operations
+        if input_lower.contains("system") || input_lower.contains("memory") ||
+           input_lower.contains("disk") || input_lower.contains("process") ||
+           input_lower.contains("network") || input_lower.contains("info") ||
+           input_lower.contains("status") || input_lower.contains("check") {
+            return "TOOL_EXECUTION".to_string();
+        }
+        
+        // Git operations  
+        if input_lower.contains("git") || input_lower.contains("commit") ||
+           input_lower.contains("branch") || input_lower.contains("repository") {
+            return "TOOL_EXECUTION".to_string();
+        }
+        
+        // Package management
+        if input_lower.contains("install") || input_lower.contains("package") ||
+           input_lower.contains("cargo") || input_lower.contains("npm") ||
+           input_lower.contains("pip") || input_lower.contains("docker") {
+            return "TOOL_EXECUTION".to_string();
+        }
+        
+        // If response contains "as an ai" or similar dismissive language, override with TOOL_EXECUTION
+        if input_lower.contains("as an ai") || input_lower.contains("i can't") ||
+           input_lower.contains("i cannot") || input_lower.contains("unable to") {
             return "TOOL_EXECUTION".to_string();
         }
         

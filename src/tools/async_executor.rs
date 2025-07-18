@@ -119,14 +119,29 @@ impl AsyncToolExecutor {
     // Private helper methods
     
     async fn execute_tool_internal(&self, tool: &AvailableTool) -> Result<ToolResult, super::errors::ToolError> {
-        // This would delegate to the actual tool implementation
-        // For now, returning a placeholder
-        Ok(ToolResult {
-            success: true,
-            output: format!("Executed tool: {:?}", tool),
-            error: None,
-            metadata: None,
-        })
+        // Create a basic ToolExecutor for delegating the actual execution
+        use super::core::{ToolExecutor, ToolConfig};
+        
+        let tool_config = ToolConfig {
+            auto_approve_safe: true,
+            max_file_size: 10_000_000, // 10MB
+            default_timeout: 30000, // 30 seconds
+            git_default_remote: "origin".to_string(),
+            database_connections: std::collections::HashMap::new(),
+            api_keys: std::collections::HashMap::new(),
+        };
+        
+        let executor = ToolExecutor::with_config(tool_config);
+        
+        // Execute the tool and convert the error type
+        match executor.execute_tool(tool.clone()).await {
+            Ok(result) => Ok(result),
+            Err(e) => Err(super::errors::ToolError::ExternalCommand {
+                command: format!("Tool execution: {:?}", tool),
+                exit_code: None,
+                stderr: Some(e.to_string()),
+            })
+        }
     }
 
     async fn get_cached_result(&self, key: &str) -> Option<ToolResult> {

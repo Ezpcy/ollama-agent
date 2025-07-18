@@ -11,7 +11,7 @@ pub struct ToolCall {
     pub requires_permission: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ToolResult {
     pub success: bool,
     pub output: String,
@@ -335,8 +335,8 @@ pub enum ApiAuth {
 
 #[derive(Debug, Clone)]
 pub enum DatabaseType {
-    PostgreSQL,
-    MySQL,
+    // PostgreSQL,
+    // MySQL,
     SQLite,
     MongoDB,
 }
@@ -534,9 +534,13 @@ impl ToolExecutor {
                 path,
             } => self.create_project(&name, &project_type, path.as_deref()),
             AvailableTool::ExecuteCommand { command } => self.execute_command(&command).await,
-            AvailableTool::GenerateCommand { user_request, context } => {
-                self.generate_command(&user_request, context.as_deref()).await
-            },
+            AvailableTool::GenerateCommand {
+                user_request,
+                context,
+            } => {
+                self.generate_command(&user_request, context.as_deref())
+                    .await
+            }
             AvailableTool::ListDirectory { path } => self.list_directory(&path),
 
             // New tools
@@ -734,29 +738,36 @@ impl ToolExecutor {
 
             // Enhanced system operations
             AvailableTool::SystemPackageManager { operation, package } => {
-                self.system_package_manager(operation, package.as_deref()).await
+                self.system_package_manager(operation, package.as_deref())
+                    .await
             }
-            AvailableTool::ServiceManager { operation, service_name } => {
-                self.service_manager(operation, &service_name).await
-            }
+            AvailableTool::ServiceManager {
+                operation,
+                service_name,
+            } => self.service_manager(operation, &service_name).await,
             AvailableTool::EnvironmentInfo => self.environment_info().await,
             AvailableTool::NetworkScan { target, scan_type } => {
                 self.network_scan(&target, scan_type).await
             }
 
             // Enhanced advanced operations
-            AvailableTool::ParallelExecution { tools } => {
-                self.parallel_execution(tools).await
-            }
-            AvailableTool::SmartSuggestion { context, current_goal } => {
-                self.smart_suggestion(&context, &current_goal).await
-            }
+            AvailableTool::ParallelExecution { tools } => Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some("Parallel execution not implemented to avoid recursion".to_string()),
+                metadata: None,
+            }),
+            AvailableTool::SmartSuggestion {
+                context,
+                current_goal,
+            } => self.smart_suggestion(&context, &current_goal).await,
             AvailableTool::PerformanceMonitor { operation } => {
                 self.performance_monitor(operation).await
             }
-            AvailableTool::CodeAnalysis { path, analysis_type } => {
-                self.code_analysis(&path, analysis_type).await
-            }
+            AvailableTool::CodeAnalysis {
+                path,
+                analysis_type,
+            } => self.code_analysis(&path, analysis_type).await,
             AvailableTool::SecurityScan { target, scan_depth } => {
                 self.security_scan(&target, scan_depth).await
             }

@@ -7,42 +7,33 @@ impl ToolExecutor {
         &self,
         repository_path: Option<&str>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        println!("{} Checking git status", "📋".cyan());
+        println!("{} Getting git status", "📊".cyan());
 
         let mut cmd = Command::new("git");
-        cmd.arg("status").arg("--porcelain");
-
-        // Validate repository_path before using it
-        if let Some(path) = repository_path {
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                cmd.current_dir(path);
-            }
-            // If path is invalid, just use current directory (no current_dir call)
+        
+        if let Some(repo_path) = repository_path {
+            cmd.args(&["-C", repo_path]);
         }
+        
+        cmd.arg("status");
 
         let output = cmd.output()?;
-
-        if !output.status.success() {
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(String::from_utf8_lossy(&output.stderr).to_string()),
-                metadata: None,
-            });
-        }
-
-        let status_output = String::from_utf8_lossy(&output.stdout);
-        let formatted_output = if status_output.trim().is_empty() {
-            "Working tree clean".to_string()
+        let success = output.status.success();
+        
+        let output_text = if success {
+            String::from_utf8_lossy(&output.stdout)
         } else {
-            format!("Modified files:\n{}", status_output)
+            String::from_utf8_lossy(&output.stderr)
         };
 
         Ok(ToolResult {
-            success: true,
-            output: formatted_output,
-            error: None,
-            metadata: None,
+            success,
+            output: output_text.to_string(),
+            error: if success { None } else { Some("Git status command failed".to_string()) },
+            metadata: Some(serde_json::json!({
+                "repository_path": repository_path,
+                "command": "status"
+            })),
         })
     }
 
@@ -51,42 +42,35 @@ impl ToolExecutor {
         files: &[String],
         repository_path: Option<&str>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        println!(
-            "{} Adding files to git: {}",
-            "➕".cyan(),
-            files.join(", ").yellow()
-        );
+        println!("{} Adding files to git: {:?}", "➕".cyan(), files);
 
         let mut cmd = Command::new("git");
+        
+        if let Some(repo_path) = repository_path {
+            cmd.args(&["-C", repo_path]);
+        }
+        
         cmd.arg("add");
-
-        for file in files {
-            cmd.arg(file);
-        }
-
-        // Validate repository_path before using it
-        if let Some(path) = repository_path {
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                cmd.current_dir(path);
-            }
-            // If path is invalid, just use current directory (no current_dir call)
-        }
+        cmd.args(files);
 
         let output = cmd.output()?;
+        let success = output.status.success();
+        
+        let output_text = if success {
+            format!("Successfully added {} files to git", files.len())
+        } else {
+            String::from_utf8_lossy(&output.stderr).to_string()
+        };
 
         Ok(ToolResult {
-            success: output.status.success(),
-            output: if output.status.success() {
-                format!("Successfully added {} file(s)", files.len())
-            } else {
-                String::new()
-            },
-            error: if output.status.success() {
-                None
-            } else {
-                Some(String::from_utf8_lossy(&output.stderr).to_string())
-            },
-            metadata: None,
+            success,
+            output: output_text,
+            error: if success { None } else { Some("Git add command failed".to_string()) },
+            metadata: Some(serde_json::json!({
+                "repository_path": repository_path,
+                "files": files,
+                "command": "add"
+            })),
         })
     }
 
@@ -95,30 +79,34 @@ impl ToolExecutor {
         message: &str,
         repository_path: Option<&str>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        println!("{} Creating commit: {}", "💾".cyan(), message.yellow());
+        println!("{} Committing with message: {}", "💾".cyan(), message.yellow());
 
         let mut cmd = Command::new("git");
-        cmd.arg("commit").arg("-m").arg(message);
-
-        // Validate repository_path before using it
-        if let Some(path) = repository_path {
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                cmd.current_dir(path);
-            }
-            // If path is invalid, just use current directory (no current_dir call)
+        
+        if let Some(repo_path) = repository_path {
+            cmd.args(&["-C", repo_path]);
         }
+        
+        cmd.args(&["commit", "-m", message]);
 
         let output = cmd.output()?;
+        let success = output.status.success();
+        
+        let output_text = if success {
+            String::from_utf8_lossy(&output.stdout)
+        } else {
+            String::from_utf8_lossy(&output.stderr)
+        };
 
         Ok(ToolResult {
-            success: output.status.success(),
-            output: String::from_utf8_lossy(&output.stdout).to_string(),
-            error: if output.status.success() {
-                None
-            } else {
-                Some(String::from_utf8_lossy(&output.stderr).to_string())
-            },
-            metadata: None,
+            success,
+            output: output_text.to_string(),
+            error: if success { None } else { Some("Git commit command failed".to_string()) },
+            metadata: Some(serde_json::json!({
+                "repository_path": repository_path,
+                "message": message,
+                "command": "commit"
+            })),
         })
     }
 
@@ -128,38 +116,40 @@ impl ToolExecutor {
         branch: Option<&str>,
         repository_path: Option<&str>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        let remote = remote.unwrap_or(&self.config.git_default_remote);
-        let branch = branch.unwrap_or("HEAD");
-
-        println!(
-            "{} Pushing to {}/{}",
-            "⬆️".cyan(),
-            remote.yellow(),
-            branch.yellow()
-        );
+        let remote_name = remote.unwrap_or("origin");
+        println!("{} Pushing to remote: {}", "🚀".cyan(), remote_name.yellow());
 
         let mut cmd = Command::new("git");
-        cmd.arg("push").arg(remote).arg(branch);
-
-        // Validate repository_path before using it
-        if let Some(path) = repository_path {
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                cmd.current_dir(path);
-            }
-            // If path is invalid, just use current directory (no current_dir call)
+        
+        if let Some(repo_path) = repository_path {
+            cmd.args(&["-C", repo_path]);
+        }
+        
+        cmd.args(&["push", remote_name]);
+        
+        if let Some(branch_name) = branch {
+            cmd.arg(branch_name);
         }
 
         let output = cmd.output()?;
+        let success = output.status.success();
+        
+        let output_text = if success {
+            String::from_utf8_lossy(&output.stdout)
+        } else {
+            String::from_utf8_lossy(&output.stderr)
+        };
 
         Ok(ToolResult {
-            success: output.status.success(),
-            output: String::from_utf8_lossy(&output.stdout).to_string(),
-            error: if output.status.success() {
-                None
-            } else {
-                Some(String::from_utf8_lossy(&output.stderr).to_string())
-            },
-            metadata: None,
+            success,
+            output: output_text.to_string(),
+            error: if success { None } else { Some("Git push command failed".to_string()) },
+            metadata: Some(serde_json::json!({
+                "repository_path": repository_path,
+                "remote": remote_name,
+                "branch": branch,
+                "command": "push"
+            })),
         })
     }
 
@@ -169,36 +159,40 @@ impl ToolExecutor {
         branch: Option<&str>,
         repository_path: Option<&str>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        let remote = remote.unwrap_or(&self.config.git_default_remote);
-
-        println!("{} Pulling from {}", "⬇️".cyan(), remote.yellow());
+        let remote_name = remote.unwrap_or("origin");
+        println!("{} Pulling from remote: {}", "⬇️".cyan(), remote_name.yellow());
 
         let mut cmd = Command::new("git");
-        cmd.arg("pull").arg(remote);
-
-        if let Some(branch) = branch {
-            cmd.arg(branch);
+        
+        if let Some(repo_path) = repository_path {
+            cmd.args(&["-C", repo_path]);
         }
-
-        // Validate repository_path before using it
-        if let Some(path) = repository_path {
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                cmd.current_dir(path);
-            }
-            // If path is invalid, just use current directory (no current_dir call)
+        
+        cmd.args(&["pull", remote_name]);
+        
+        if let Some(branch_name) = branch {
+            cmd.arg(branch_name);
         }
 
         let output = cmd.output()?;
+        let success = output.status.success();
+        
+        let output_text = if success {
+            String::from_utf8_lossy(&output.stdout)
+        } else {
+            String::from_utf8_lossy(&output.stderr)
+        };
 
         Ok(ToolResult {
-            success: output.status.success(),
-            output: String::from_utf8_lossy(&output.stdout).to_string(),
-            error: if output.status.success() {
-                None
-            } else {
-                Some(String::from_utf8_lossy(&output.stderr).to_string())
-            },
-            metadata: None,
+            success,
+            output: output_text.to_string(),
+            error: if success { None } else { Some("Git pull command failed".to_string()) },
+            metadata: Some(serde_json::json!({
+                "repository_path": repository_path,
+                "remote": remote_name,
+                "branch": branch,
+                "command": "pull"
+            })),
         })
     }
 
@@ -207,50 +201,50 @@ impl ToolExecutor {
         operation: GitBranchOperation,
         repository_path: Option<&str>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        let mut cmd = Command::new("git");
+        println!("{} Git branch operation: {:?}", "🌿".cyan(), operation);
 
+        let mut cmd = Command::new("git");
+        
+        if let Some(repo_path) = repository_path {
+            cmd.args(&["-C", repo_path]);
+        }
+        
         match operation {
             GitBranchOperation::List => {
-                println!("{} Listing branches", "🌿".cyan());
-                cmd.arg("branch").arg("-a");
+                cmd.args(&["branch", "-a"]);
             }
             GitBranchOperation::Create { ref name } => {
-                println!("{} Creating branch: {}", "🌱".cyan(), name.yellow());
-                cmd.arg("checkout").arg("-b").arg(name);
+                cmd.args(&["branch", name]);
             }
             GitBranchOperation::Switch { ref name } => {
-                println!("{} Switching to branch: {}", "🔄".cyan(), name.yellow());
-                cmd.arg("checkout").arg(name);
+                cmd.args(&["checkout", name]);
             }
             GitBranchOperation::Delete { ref name } => {
-                println!("{} Deleting branch: {}", "🗑️".cyan(), name.yellow());
-                cmd.arg("branch").arg("-d").arg(name);
+                cmd.args(&["branch", "-d", name]);
             }
             GitBranchOperation::Merge { ref from } => {
-                println!("{} Merging from branch: {}", "🔀".cyan(), from.yellow());
-                cmd.arg("merge").arg(from);
+                cmd.args(&["merge", from]);
             }
-        }
-
-        // Validate repository_path before using it
-        if let Some(path) = repository_path {
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                cmd.current_dir(path);
-            }
-            // If path is invalid, just use current directory (no current_dir call)
         }
 
         let output = cmd.output()?;
+        let success = output.status.success();
+        
+        let output_text = if success {
+            String::from_utf8_lossy(&output.stdout)
+        } else {
+            String::from_utf8_lossy(&output.stderr)
+        };
 
         Ok(ToolResult {
-            success: output.status.success(),
-            output: String::from_utf8_lossy(&output.stdout).to_string(),
-            error: if output.status.success() {
-                None
-            } else {
-                Some(String::from_utf8_lossy(&output.stderr).to_string())
-            },
-            metadata: None,
+            success,
+            output: output_text.to_string(),
+            error: if success { None } else { Some("Git branch command failed".to_string()) },
+            metadata: Some(serde_json::json!({
+                "repository_path": repository_path,
+                "operation": format!("{:?}", operation),
+                "command": "branch"
+            })),
         })
     }
 
@@ -260,40 +254,43 @@ impl ToolExecutor {
         oneline: bool,
         repository_path: Option<&str>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        println!("{} Getting git log", "📜".cyan());
+        println!("{} Getting git log", "📋".cyan());
 
         let mut cmd = Command::new("git");
-        cmd.arg("log");
-
-        if let Some(count) = count {
-            cmd.arg(format!("-{}", count));
+        
+        if let Some(repo_path) = repository_path {
+            cmd.args(&["-C", repo_path]);
         }
-
+        
+        cmd.arg("log");
+        
         if oneline {
             cmd.arg("--oneline");
-        } else {
-            cmd.arg("--pretty=format:%h - %an, %ar : %s");
         }
-
-        // Validate repository_path before using it
-        if let Some(path) = repository_path {
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                cmd.current_dir(path);
-            }
-            // If path is invalid, just use current directory (no current_dir call)
+        
+        if let Some(n) = count {
+            cmd.arg(format!("-{}", n));
         }
 
         let output = cmd.output()?;
+        let success = output.status.success();
+        
+        let output_text = if success {
+            String::from_utf8_lossy(&output.stdout)
+        } else {
+            String::from_utf8_lossy(&output.stderr)
+        };
 
         Ok(ToolResult {
-            success: output.status.success(),
-            output: String::from_utf8_lossy(&output.stdout).to_string(),
-            error: if output.status.success() {
-                None
-            } else {
-                Some(String::from_utf8_lossy(&output.stderr).to_string())
-            },
-            metadata: None,
+            success,
+            output: output_text.to_string(),
+            error: if success { None } else { Some("Git log command failed".to_string()) },
+            metadata: Some(serde_json::json!({
+                "repository_path": repository_path,
+                "count": count,
+                "oneline": oneline,
+                "command": "log"
+            })),
         })
     }
 
@@ -303,42 +300,43 @@ impl ToolExecutor {
         cached: bool,
         repository_path: Option<&str>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        println!("{} Getting git diff", "📊".cyan());
+        println!("{} Getting git diff", "🔍".cyan());
 
         let mut cmd = Command::new("git");
+        
+        if let Some(repo_path) = repository_path {
+            cmd.args(&["-C", repo_path]);
+        }
+        
         cmd.arg("diff");
-
+        
         if cached {
             cmd.arg("--cached");
         }
-
-        if let Some(file) = file {
-            cmd.arg(file);
-        }
-
-        // Validate repository_path before using it
-        if let Some(path) = repository_path {
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                cmd.current_dir(path);
-            }
-            // If path is invalid, just use current directory (no current_dir call)
+        
+        if let Some(file_path) = file {
+            cmd.arg(file_path);
         }
 
         let output = cmd.output()?;
+        let success = output.status.success();
+        
+        let output_text = if success {
+            String::from_utf8_lossy(&output.stdout)
+        } else {
+            String::from_utf8_lossy(&output.stderr)
+        };
 
         Ok(ToolResult {
-            success: output.status.success(),
-            output: if output.stdout.is_empty() {
-                "No differences found".to_string()
-            } else {
-                String::from_utf8_lossy(&output.stdout).to_string()
-            },
-            error: if output.status.success() {
-                None
-            } else {
-                Some(String::from_utf8_lossy(&output.stderr).to_string())
-            },
-            metadata: None,
+            success,
+            output: output_text.to_string(),
+            error: if success { None } else { Some("Git diff command failed".to_string()) },
+            metadata: Some(serde_json::json!({
+                "repository_path": repository_path,
+                "file": file,
+                "cached": cached,
+                "command": "diff"
+            })),
         })
     }
 }

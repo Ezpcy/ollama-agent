@@ -915,7 +915,12 @@ Respond with only one of: COMMAND_GENERATION, TOOL_EXECUTION, or GENERAL_CONVERS
         };
 
         let response = generate_response_silent(&self.model, &analysis_prompt).await?;
-        let decision = response.trim().to_uppercase();
+        
+        // Handle reasoning models that wrap their response in <think> tags
+        let cleaned_response = self.extract_decision_from_reasoning_response(&response);
+        let decision = cleaned_response.trim().to_uppercase();
+
+        // Debug output removed - parsing working correctly
 
         let is_command_generation_enabled = self
             .tool_executor
@@ -941,6 +946,46 @@ Respond with only one of: COMMAND_GENERATION, TOOL_EXECUTION, or GENERAL_CONVERS
             }
             _ => Ok(ResponseMode::GeneralConversation),
         }
+    }
+
+    fn extract_decision_from_reasoning_response(&self, response: &str) -> String {
+        // Handle reasoning models that wrap their response in <think> tags
+        // Look for the actual decision after the reasoning
+        
+        // Strategy 1: Look for the decision keywords directly in the response
+        let decision_keywords = ["TOOL_EXECUTION", "COMMAND_GENERATION", "GENERAL_CONVERSATION"];
+        for keyword in decision_keywords {
+            if response.to_uppercase().contains(keyword) {
+                return keyword.to_string();
+            }
+        }
+        
+        // Strategy 2: Look for content after </think> tag
+        if let Some(think_end) = response.find("</think>") {
+            let after_think = &response[think_end + 8..]; // 8 is length of "</think>"
+            let cleaned = after_think.trim();
+            if !cleaned.is_empty() {
+                // Check if it contains our expected keywords
+                for keyword in decision_keywords {
+                    if cleaned.to_uppercase().contains(keyword) {
+                        return keyword.to_string();
+                    }
+                }
+                return cleaned.to_string();
+            }
+        }
+        
+        // Strategy 3: For "list files" and similar requests, if we don't find a clear decision,
+        // default to TOOL_EXECUTION since these are clearly tool-oriented requests
+        let input_lower = response.to_lowercase();
+        if input_lower.contains("list") || input_lower.contains("files") || 
+           input_lower.contains("directory") || input_lower.contains("folder") ||
+           input_lower.contains("show") || input_lower.contains("display") {
+            return "TOOL_EXECUTION".to_string();
+        }
+        
+        // Strategy 4: Return the original response if no patterns match
+        response.to_string()
     }
 
     // Create context-aware prompt

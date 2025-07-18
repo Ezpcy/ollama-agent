@@ -224,15 +224,90 @@ Analyze the request and respond with JSON only:"#,
     }
 
     fn parse_llm_response(&self, response: &str) -> Result<ToolAnalysis, serde_json::Error> {
-        // Extract JSON from the response
+        // Try multiple strategies to extract JSON from reasoning model responses
+        
+        // Strategy 1: Look for complete JSON objects with proper brace matching
+        if let Some(json_str) = self.extract_json_with_brace_matching(response) {
+            if let Ok(analysis) = serde_json::from_str::<ToolAnalysis>(&json_str) {
+                return Ok(analysis);
+            }
+        }
+        
+        // Strategy 2: Look for JSON blocks marked with ```json
+        if let Some(json_str) = self.extract_json_from_code_blocks(response) {
+            if let Ok(analysis) = serde_json::from_str::<ToolAnalysis>(&json_str) {
+                return Ok(analysis);
+            }
+        }
+        
+        // Strategy 3: Original simple extraction (fallback)
         if let Some(start) = response.find('{') {
             if let Some(end) = response.rfind('}') {
                 let json_str = &response[start..=end];
-                return serde_json::from_str(json_str);
+                if let Ok(analysis) = serde_json::from_str::<ToolAnalysis>(json_str) {
+                    return Ok(analysis);
+                }
             }
         }
 
+        // Strategy 4: Try parsing the entire response as JSON
         serde_json::from_str(response)
+    }
+    
+    fn extract_json_with_brace_matching(&self, response: &str) -> Option<String> {
+        let mut brace_count = 0;
+        let mut start_pos = None;
+        let chars: Vec<char> = response.chars().collect();
+        
+        for (i, &ch) in chars.iter().enumerate() {
+            match ch {
+                '{' => {
+                    if brace_count == 0 {
+                        start_pos = Some(i);
+                    }
+                    brace_count += 1;
+                }
+                '}' => {
+                    brace_count -= 1;
+                    if brace_count == 0 {
+                        if let Some(start) = start_pos {
+                            let json_str = &response[start..=i];
+                            // Quick validation that this looks like our expected structure
+                            if json_str.contains("\"reasoning\"") && json_str.contains("\"tools\"") {
+                                return Some(json_str.to_string());
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        None
+    }
+    
+    fn extract_json_from_code_blocks(&self, response: &str) -> Option<String> {
+        // Look for ```json ... ``` blocks
+        if let Some(start) = response.find("```json") {
+            let content_start = start + 7;
+            if let Some(end) = response[content_start..].find("```") {
+                let json_str = &response[content_start..content_start + end].trim();
+                return Some(json_str.to_string());
+            }
+        }
+        
+        // Look for ``` ... ``` blocks that might contain JSON
+        if let Some(start) = response.find("```") {
+            let content_start = start + 3;
+            if let Some(end) = response[content_start..].find("```") {
+                let potential_json = &response[content_start..content_start + end].trim();
+                if potential_json.starts_with('{') && potential_json.ends_with('}') {
+                    return Some(potential_json.to_string());
+                }
+            }
+        }
+        
+        None
     }
 
     fn convert_to_tools(&self, analysis: ToolAnalysis) -> Vec<AvailableTool> {
@@ -774,10 +849,98 @@ Analyze the request and respond with JSON only:"#,
         tools
     }
 
-    fn enhanced_fallback_parse(&self, _input: &str) -> Vec<AvailableTool> {
-        // Remove fallback parsing - let LLM handle everything
-        // If LLM fails, return empty vec to trigger general conversation
-        vec![]
+    fn enhanced_fallback_parse(&self, input: &str) -> Vec<AvailableTool> {
+        // Enhanced fallback parsing when LLM fails
+        let input_lower = input.to_lowercase();
+        let mut tools = Vec::new();
+        
+        // File operations
+        if input_lower.contains("read") || input_lower.contains("show") || input_lower.contains("cat") {
+            if let Some(filename) = self.extract_filename(input) {
+                tools.push(AvailableTool::FileRead { path: filename });
+            }
+        }
+        
+        // Directory listing
+        if input_lower.contains("list") || input_lower.contains("ls") || input_lower.contains("dir") {
+            let path = self.extract_path(input).unwrap_or_else(|| ".".to_string());
+            tools.push(AvailableTool::ListDirectory { path });
+        }
+        
+        // File search
+        if input_lower.contains("find") || input_lower.contains("search") {
+            if let Some(pattern) = self.extract_search_pattern(input) {
+                tools.push(AvailableTool::FileSearch { 
+                    pattern, 
+                    directory: None 
+                });
+            }
+        }
+        
+        // Git operations
+        if input_lower.contains("git status") {
+            tools.push(AvailableTool::GitStatus { repository_path: None });
+        }
+        
+        // System info
+        if input_lower.contains("system") && input_lower.contains("info") {
+            tools.push(AvailableTool::SystemInfo);
+        }
+        
+        // Process list
+        if input_lower.contains("process") || input_lower.contains("ps") {
+            tools.push(AvailableTool::ProcessList { filter: None });
+        }
+        
+        tools
+    }
+    
+    fn extract_filename(&self, input: &str) -> Option<String> {
+        // Common file extensions
+        let extensions = [".rs", ".toml", ".json", ".md", ".txt", ".py", ".js", ".ts", ".go", ".c", ".cpp", ".h"];
+        
+        for ext in extensions {
+            if let Some(start) = input.find(ext) {
+                // Look backwards to find the start of the filename
+                let before = &input[..start];
+                if let Some(space_pos) = before.rfind(' ') {
+                    return Some(input[space_pos + 1..start + ext.len()].to_string());
+                } else {
+                    return Some(input[..start + ext.len()].to_string());
+                }
+            }
+        }
+        
+        None
+    }
+    
+    fn extract_path(&self, input: &str) -> Option<String> {
+        // Look for path patterns like "src/", "./", "../", etc.
+        let words: Vec<&str> = input.split_whitespace().collect();
+        for word in words {
+            if word.contains('/') && !word.starts_with("http") {
+                return Some(word.to_string());
+            }
+        }
+        None
+    }
+    
+    fn extract_search_pattern(&self, input: &str) -> Option<String> {
+        // Look for patterns like "find *.rs", "search for TODO", etc.
+        let words: Vec<&str> = input.split_whitespace().collect();
+        for (i, word) in words.iter().enumerate() {
+            if *word == "find" || *word == "search" {
+                if i + 1 < words.len() {
+                    let next_word = words[i + 1];
+                    if next_word != "for" && next_word != "in" {
+                        return Some(next_word.to_string());
+                    } else if i + 2 < words.len() {
+                        return Some(words[i + 2].to_string());
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn simple_fallback_parse(&self, _input: &str) -> Vec<AvailableTool> {

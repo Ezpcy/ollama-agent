@@ -1143,6 +1143,7 @@ impl Clone for ToolExecutor {
         Self {
             web_client: self.web_client.clone(),
             config: self.config.clone(),
+            execution_depth: self.execution_depth.clone(),
         }
     }
 }

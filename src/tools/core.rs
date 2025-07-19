@@ -1,5 +1,8 @@
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc as StdArc;
 
 // Tool definition system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -471,6 +474,7 @@ pub enum SecurityScanDepth {
 pub struct ToolExecutor {
     pub web_client: reqwest::Client,
     pub config: ToolConfig,
+    pub execution_depth: StdArc<AtomicU32>,
 }
 
 #[derive(Debug, Clone)]
@@ -501,6 +505,7 @@ impl ToolExecutor {
         Self {
             web_client: reqwest::Client::new(),
             config: ToolConfig::default(),
+            execution_depth: StdArc::new(AtomicU32::new(0)),
         }
     }
 
@@ -508,6 +513,7 @@ impl ToolExecutor {
         Self {
             web_client: reqwest::Client::new(),
             config,
+            execution_depth: StdArc::new(AtomicU32::new(0)),
         }
     }
 
@@ -751,12 +757,9 @@ impl ToolExecutor {
             }
 
             // Enhanced advanced operations
-            AvailableTool::ParallelExecution { tools } => Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some("Parallel execution not implemented to avoid recursion".to_string()),
-                metadata: None,
-            }),
+            AvailableTool::ParallelExecution { tools } => {
+                self.parallel_execution_safe(&tools).await
+            }
             AvailableTool::SmartSuggestion {
                 context,
                 current_goal,
@@ -772,5 +775,202 @@ impl ToolExecutor {
                 self.security_scan(&target, scan_depth).await
             }
         }
+    }
+
+    /// Execute multiple tools in parallel with recursion protection
+    pub async fn parallel_execution_safe(
+        &self,
+        tools: &[AvailableTool],
+    ) -> Result<ToolResult, Box<dyn std::error::Error>> {
+        const MAX_DEPTH: u32 = 3;
+        const MAX_PARALLEL_TOOLS: usize = 5;
+        
+        // Check recursion depth
+        let current_depth = self.execution_depth.load(Ordering::Relaxed);
+        if current_depth >= MAX_DEPTH {
+            return Ok(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!(
+                    "Maximum execution depth {} reached to prevent infinite recursion",
+                    MAX_DEPTH
+                )),
+                metadata: Some(serde_json::json!({
+                    "max_depth_reached": true,
+                    "current_depth": current_depth,
+                    "tools_count": tools.len()
+                })),
+            });
+        }
+        
+        // Limit number of parallel tools
+        let limited_tools = if tools.len() > MAX_PARALLEL_TOOLS {
+            println!(
+                "{} Limiting parallel execution to {} tools (requested: {})",
+                "⚠️".yellow(),
+                MAX_PARALLEL_TOOLS,
+                tools.len()
+            );
+            &tools[..MAX_PARALLEL_TOOLS]
+        } else {
+            tools
+        };
+        
+        if limited_tools.is_empty() {
+            return Ok(ToolResult {
+                success: true,
+                output: "No tools to execute".to_string(),
+                error: None,
+                metadata: Some(serde_json::json!({
+                    "tools_executed": 0
+                })),
+            });
+        }
+        
+        println!(
+            "{} Executing {} tools in parallel",
+            "⚡".cyan(),
+            limited_tools.len()
+        );
+        
+        // Increment depth counter
+        self.execution_depth.fetch_add(1, Ordering::Relaxed);
+        
+        // Create futures for each tool
+        let futures: Vec<_> = limited_tools
+            .iter()
+            .enumerate()
+            .map(|(index, tool)| {
+                let tool_clone = tool.clone();
+                let executor_clone = Self {
+                    web_client: self.web_client.clone(),
+                    config: self.config.clone(),
+                    execution_depth: self.execution_depth.clone(),
+                };
+                
+                async move {
+                    let start_time = std::time::Instant::now();
+                    let result = executor_clone.execute_tool(tool_clone.clone()).await;
+                    let duration = start_time.elapsed();
+                    
+                    match result {
+                        Ok(tool_result) => {
+                            println!(
+                                "{} Tool {} completed in {:.2}s",
+                                "✓".green(),
+                                index + 1,
+                                duration.as_secs_f64()
+                            );
+                            (index, Ok(tool_result))
+                        }
+                        Err(e) => {
+                            println!(
+                                "{} Tool {} failed in {:.2}s: {}",
+                                "✗".red(),
+                                index + 1,
+                                duration.as_secs_f64(),
+                                e
+                            );
+                            (index, Err(e))
+                        }
+                    }
+                }
+            })
+            .collect();
+        
+        // Execute all tools concurrently
+        let results = futures::future::join_all(futures).await;
+        
+        // Decrement depth counter
+        self.execution_depth.fetch_sub(1, Ordering::Relaxed);
+        
+        // Process results
+        let mut successful_results = Vec::new();
+        let mut failed_results = Vec::new();
+        let mut output_parts = Vec::new();
+        
+        for (index, result) in results {
+            match result {
+                Ok(tool_result) => {
+                    successful_results.push((index, tool_result.clone()));
+                    if tool_result.success {
+                        output_parts.push(format!(
+                            "Tool {}: SUCCESS\n{}",
+                            index + 1,
+                            tool_result.output
+                        ));
+                    } else {
+                        output_parts.push(format!(
+                            "Tool {}: FAILED\n{}",
+                            index + 1,
+                            tool_result.error.unwrap_or("Unknown error".to_string())
+                        ));
+                    }
+                }
+                Err(e) => {
+                    failed_results.push((index, e.to_string()));
+                    output_parts.push(format!(
+                        "Tool {}: ERROR\n{}",
+                        index + 1,
+                        e
+                    ));
+                }
+            }
+        }
+        
+        let overall_success = failed_results.is_empty() && 
+            successful_results.iter().all(|(_, result)| result.success);
+        
+        let summary = if overall_success {
+            format!(
+                "{} All {} tools executed successfully",
+                "✓".green(),
+                limited_tools.len()
+            )
+        } else {
+            format!(
+                "{} {}/{} tools completed successfully",
+                if successful_results.len() > failed_results.len() { "⚠️".yellow() } else { "✗".red() },
+                successful_results.iter().filter(|(_, r)| r.success).count(),
+                limited_tools.len()
+            )
+        };
+        
+        Ok(ToolResult {
+            success: overall_success,
+            output: format!(
+                "{}\n\n{}\n\n--- Detailed Results ---\n{}",
+                summary,
+                format!(
+                    "Execution Summary:\n- Total tools: {}\n- Successful: {}\n- Failed: {}",
+                    limited_tools.len(),
+                    successful_results.iter().filter(|(_, r)| r.success).count(),
+                    failed_results.len() + successful_results.iter().filter(|(_, r)| !r.success).count()
+                ),
+                output_parts.join("\n\n---\n\n")
+            ),
+            error: if failed_results.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "Failed tools: {}",
+                    failed_results
+                        .iter()
+                        .map(|(i, e)| format!("Tool {}: {}", i + 1, e))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ))
+            },
+            metadata: Some(serde_json::json!({
+                "parallel_execution": true,
+                "total_tools": limited_tools.len(),
+                "successful_tools": successful_results.iter().filter(|(_, r)| r.success).count(),
+                "failed_tools": failed_results.len() + successful_results.iter().filter(|(_, r)| !r.success).count(),
+                "execution_depth": current_depth,
+                "max_depth_limit": MAX_DEPTH,
+                "max_parallel_limit": MAX_PARALLEL_TOOLS,
+                "tools_limited": tools.len() > MAX_PARALLEL_TOOLS
+            })),
+        })
     }
 }

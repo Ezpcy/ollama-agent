@@ -1,6 +1,5 @@
 use colored::Colorize;
 use regex::Regex;
-use scraper::{Html, Selector};
 use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;
@@ -9,759 +8,95 @@ use walkdir::WalkDir;
 
 use super::core::{EditOperation, ToolExecutor, ToolResult};
 use super::search::{enhanced_file_search, ErrorStrategy, SearchQuery, ToolChain};
+use super::web_search::{WebSearchEngine, WebSearchConfig, format_search_results, get_fallback_resources};
+use super::enhanced_web::{WebScrapingConfig, EnhancedWebContent};
+use super::web_api_testing::{ApiTestConfig, ApiValidation};
 
 impl ToolExecutor {
-    // Enhanced web search implementation with multiple sources and content scraping
+    // Enhanced web search implementation using the new robust system
     pub async fn web_search(&self, query: &str) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        println!("{} Searching web for: {}", "🔍".cyan(), query.yellow());
-
-        let mut all_results = Vec::new();
-        let mut search_success = false;
-        let mut search_errors = Vec::new();
-
-        // Try multiple search engines for better results
-        let search_engines = vec![
-            ("Wikipedia", self.search_wikipedia(query).await),
-            ("Bing", self.search_bing(query).await),
-            ("DuckDuckGo", self.search_duckduckgo(query).await),
-        ];
-
-        for (engine_name, search_result) in search_engines {
-            match search_result {
-                Ok(results) => {
-                    if !results.is_empty() {
-                        all_results.extend(results);
-                        search_success = true;
-                        println!(
-                            "{} Found {} results from {}",
-                            "✓".green(),
-                            all_results.len(),
-                            engine_name
-                        );
-                    }
-                }
-                Err(e) => {
-                    search_errors.push(format!("{}: {}", engine_name, e));
-                    println!("{} {} search failed: {}", "✗".red(), engine_name, e);
-                }
-            }
-        }
-
-        // Try our alternative search method if we don't have enough results
-        if all_results.len() < 2 {
-            if let Ok(alt_results) = self.alternative_search(query).await {
-                if !alt_results.is_empty() {
-                    all_results.extend(alt_results);
-                    search_success = true;
-                    println!("{} Found results from alternative search", "✓".green());
-                }
-            }
-        }
-
-        // Remove duplicates and rank results
-        let deduplicated_results = self.deduplicate_and_rank_results(all_results);
-
-        // Extract URLs from the results and scrape content
-        let mut content_results = Vec::new();
-        let mut scraping_errors = Vec::new();
-
-        for result in deduplicated_results.iter().take(3) {
-            // Limit to top 3 results to avoid overwhelming
-            if let Some(url) = self.extract_url_from_result(result) {
-                println!("{} Scraping content from: {}", "📄".cyan(), url);
-
-                match self.scrape_url_content(&url).await {
-                    Ok(content) => {
-                        if !content.is_empty() {
-                            let title = self.extract_title_from_result(result);
-                            content_results.push(format!(
-                                "🔗 **{}**\nURL: {}\nContent: {}",
-                                title, url, content
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        scraping_errors.push(format!("Failed to scrape {}: {}", url, e));
-                        println!("{} Failed to scrape {}: {}", "✗".red(), url, e);
-                    }
-                }
-            }
-        }
-
-        // If we have content, use it; otherwise fall back to search results
-        let final_output = if !content_results.is_empty() {
-            format!(
-                "Search Results with Content for '{}':\n\n{}",
-                query,
-                content_results.join("\n\n---\n\n")
-            )
-        } else {
-            format!(
-                "Search Results for '{}':\n\n{}{}",
-                query,
-                deduplicated_results.join("\n\n"),
-                if !scraping_errors.is_empty() {
-                    format!(
-                        "\n\nNote: Content scraping failed for some URLs: {}",
-                        scraping_errors.join("; ")
-                    )
-                } else {
-                    String::new()
-                }
-            )
-        };
-
-        Ok(ToolResult {
-            success: search_success,
-            output: if deduplicated_results.is_empty() {
-                // Provide helpful information even when search engines fail
-                let fallback_msg = if self.is_programming_query(query) {
-                    self.get_programming_resources(query).join("\n")
-                } else if self.is_educational_query(query) {
-                    self.get_educational_resources(query).join("\n")
-                } else {
-                    format!(
-                        "Search engines are currently unavailable, but here are some general resources:\n{}",
-                        self.get_educational_resources(query).join("\n")
-                    )
-                };
+        let config = WebSearchConfig::default();
+        let search_engine = WebSearchEngine::new(config);
+        
+        match search_engine.search(query).await {
+            Ok(results) => {
+                let search_success = !results.is_empty();
+                let final_output = format_search_results(&results, query);
                 
-                format!(
-                    "Search completed for '{}' but search engines returned limited results.\n\nHere are some relevant resources:\n{}\n\nTechnical details: {}",
-                    query,
-                    fallback_msg,
-                    search_errors.join("; ")
-                )
-            } else {
-                final_output
-            },
-            error: if search_success {
-                None
-            } else {
-                Some(format!(
-                    "All search engines failed: {}",
-                    search_errors.join("; ")
-                ))
-            },
-            metadata: Some(serde_json::json!({
-                "query": query,
-                "total_results": deduplicated_results.len(),
-                "content_results": content_results.len(),
-                "search_engines_used": ["DuckDuckGo", "Bing", "Wikipedia"],
-                "search_errors": search_errors,
-                "scraping_errors": scraping_errors
-            })),
-        })
-    }
+                // Count results with content
+                let content_count = results.iter().filter(|r| r.content.is_some()).count();
 
-    // DuckDuckGo search with improved parsing
-    async fn search_duckduckgo(
-        &self,
-        query: &str,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        // Use the correct DuckDuckGo HTML search endpoint
-        let search_url = format!(
-            "https://html.duckduckgo.com/html/?q={}",
-            urlencoding::encode(query)
-        );
-
-        let response = self
-            .web_client
-            .get(&search_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-            .header("Accept-Language", "en-US,en;q=0.5")
-            .header("Accept-Encoding", "gzip, deflate")
-            .header("Connection", "keep-alive")
-            .header("Upgrade-Insecure-Requests", "1")
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await?;
-
-        let html = response.text().await?;
-        let document = Html::parse_document(&html);
-        let mut results = Vec::new();
-
-        // DuckDuckGo-specific selectors based on their HTML structure
-        let selector = Selector::parse(".result__title .result__a").unwrap();
-        
-        for element in document.select(&selector).take(10) {
-            if let Some(href) = element.value().attr("href") {
-                // Get title text
-                let title_text = element.text().collect::<String>();
-                let clean_title = title_text.trim();
-                
-                // Skip empty titles or very short ones
-                if clean_title.is_empty() || clean_title.len() < 3 {
-                    continue;
-                }
-                
-                // Extract the actual URL from DuckDuckGo's redirect
-                let actual_url = if href.starts_with("//duckduckgo.com/l/?uddg=") {
-                    // Extract the encoded URL from the redirect
-                    if let Some(start) = href.find("uddg=") {
-                        let encoded_url = &href[start + 5..];
-                        if let Some(end) = encoded_url.find('&') {
-                            urlencoding::decode(&encoded_url[..end])
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|_| href.to_string())
-                        } else {
-                            urlencoding::decode(encoded_url)
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|_| href.to_string())
-                        }
-                    } else {
-                        href.to_string()
-                    }
-                } else if href.starts_with("http") {
-                    href.to_string()
-                } else {
-                    continue; // Skip relative URLs
-                };
-                
-                // Skip ads and internal links
-                if clean_title.to_lowercase().contains("ad") && href.contains("ad_domain") {
-                    continue;
-                }
-                
-                // Format result
-                results.push(format!("📄 {}: {}", clean_title, actual_url));
+                Ok(ToolResult {
+                    success: search_success,
+                    output: final_output,
+                    error: None,
+                    metadata: Some(serde_json::json!({
+                        "query": query,
+                        "total_results": results.len(),
+                        "results_with_content": content_count,
+                        "search_engines_used": ["Wikipedia", "DuckDuckGo", "Bing"],
+                        "average_relevance_score": results.iter().map(|r| r.relevance_score).sum::<f64>() / results.len() as f64
+                    })),
+                })
             }
-            
-            if results.len() >= 5 {
-                break;
-            }
-        }
-
-        Ok(results)
-    }
-
-    // Bing search implementation
-    async fn search_bing(&self, query: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let search_url = format!(
-            "https://www.bing.com/search?q={}",
-            urlencoding::encode(query)
-        );
-
-        let response = self
-            .web_client
-            .get(&search_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-            .header("Accept-Language", "en-US,en;q=0.5")
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await?;
-
-        let html = response.text().await?;
-        let document = Html::parse_document(&html);
-        let mut results = Vec::new();
-
-        // Bing-specific selectors - focus on the main algorithm results
-        let selector = Selector::parse(".b_algo h2 a").unwrap();
-        
-        for element in document.select(&selector).take(10) {
-            if let Some(href) = element.value().attr("href") {
-                // Get title text
-                let title_text = element.text().collect::<String>();
-                let clean_title = title_text.trim();
-                
-                // Skip empty titles or very short ones
-                if clean_title.is_empty() || clean_title.len() < 3 {
-                    continue;
-                }
-                
-                // Skip non-URL hrefs or internal links
-                if !href.starts_with("http") || href.contains("bing.com") || href.contains("microsoft.com") {
-                    continue;
-                }
-                
-                // Format result
-                results.push(format!("🔍 {}: {}", clean_title, href));
-            }
-            
-            if results.len() >= 5 {
-                break;
-            }
-        }
-
-        Ok(results)
-    }
-
-    // Wikipedia search for factual queries
-    async fn search_wikipedia(
-        &self,
-        query: &str,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let api_url = format!(
-            "https://en.wikipedia.org/api/rest_v1/page/summary/{}",
-            urlencoding::encode(query)
-        );
-
-        let response = self
-            .web_client
-            .get(&api_url)
-            .header("User-Agent", "Mozilla/5.0 (compatible; Assistant/1.0)")
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let json: serde_json::Value = response.json().await?;
-
-            if let Some(extract) = json.get("extract").and_then(|v| v.as_str()) {
-                if let Some(title) = json.get("title").and_then(|v| v.as_str()) {
-                    if let Some(page_url) = json
-                        .get("content_urls")
-                        .and_then(|v| v.get("desktop"))
-                        .and_then(|v| v.get("page"))
-                        .and_then(|v| v.as_str())
-                    {
-                        let result = format!(
-                            "📚 Wikipedia - {}: {}\n   Summary: {}",
-                            title, page_url, extract
-                        );
-                        return Ok(vec![result]);
-                    }
-                }
-            }
-        }
-
-        Ok(vec![])
-    }
-
-    // Alternative search method using various APIs and known sources
-    async fn alternative_search(&self, query: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let mut results = Vec::new();
-        
-        // For programming-related queries, try to provide helpful links
-        if self.is_programming_query(query) {
-            results.extend(self.get_programming_resources(query));
-        }
-        
-        // For general queries, provide some educational resources
-        if self.is_educational_query(query) {
-            results.extend(self.get_educational_resources(query));
-        }
-        
-        // For technical queries, provide documentation links
-        if self.is_technical_query(query) {
-            results.extend(self.get_technical_resources(query));
-        }
-        
-        Ok(results)
-    }
-
-    fn is_programming_query(&self, query: &str) -> bool {
-        let programming_keywords = [
-            "programming", "code", "rust", "python", "javascript", "java", "c++", "golang", 
-            "development", "software", "algorithm", "function", "variable", "syntax", "compile",
-            "debug", "library", "framework", "api", "database", "sql", "html", "css", "react",
-            "vue", "angular", "node", "npm", "cargo", "git", "github", "tutorial", "learn"
-        ];
-        
-        let query_lower = query.to_lowercase();
-        programming_keywords.iter().any(|keyword| query_lower.contains(keyword))
-    }
-
-    fn is_educational_query(&self, query: &str) -> bool {
-        let educational_keywords = [
-            "what is", "how to", "learn", "tutorial", "guide", "explain", "definition",
-            "meaning", "example", "basics", "introduction", "beginner", "course"
-        ];
-        
-        let query_lower = query.to_lowercase();
-        educational_keywords.iter().any(|keyword| query_lower.contains(keyword))
-    }
-
-    fn is_technical_query(&self, query: &str) -> bool {
-        let technical_keywords = [
-            "documentation", "docs", "specification", "standard", "rfc", "manual",
-            "reference", "config", "setup", "install", "command", "cli", "terminal"
-        ];
-        
-        let query_lower = query.to_lowercase();
-        technical_keywords.iter().any(|keyword| query_lower.contains(keyword))
-    }
-
-    fn get_programming_resources(&self, query: &str) -> Vec<String> {
-        let mut resources = Vec::new();
-        let query_lower = query.to_lowercase();
-        
-        if query_lower.contains("rust") {
-            resources.push("📘 The Rust Programming Language: https://doc.rust-lang.org/book/".to_string());
-            resources.push("📚 Rust by Example: https://doc.rust-lang.org/rust-by-example/".to_string());
-            resources.push("🦀 Rust Standard Library: https://doc.rust-lang.org/std/".to_string());
-        }
-        
-        if query_lower.contains("python") {
-            resources.push("🐍 Python Official Documentation: https://docs.python.org/3/".to_string());
-            resources.push("📖 Python Tutorial: https://docs.python.org/3/tutorial/".to_string());
-        }
-        
-        if query_lower.contains("javascript") {
-            resources.push("📝 MDN JavaScript Guide: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide".to_string());
-            resources.push("⚡ JavaScript Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference".to_string());
-        }
-        
-        if query_lower.contains("git") {
-            resources.push("📚 Pro Git Book: https://git-scm.com/book".to_string());
-            resources.push("🔧 Git Documentation: https://git-scm.com/docs".to_string());
-        }
-        
-        resources
-    }
-
-    fn get_educational_resources(&self, _query: &str) -> Vec<String> {
-        vec![
-            "🎓 freeCodeCamp: https://www.freecodecamp.org/".to_string(),
-            "📚 Khan Academy: https://www.khanacademy.org/".to_string(),
-            "💻 Codecademy: https://www.codecademy.com/".to_string(),
-        ]
-    }
-
-    fn get_technical_resources(&self, query: &str) -> Vec<String> {
-        let mut resources = Vec::new();
-        let query_lower = query.to_lowercase();
-        
-        if query_lower.contains("linux") || query_lower.contains("unix") {
-            resources.push("📖 Linux Documentation: https://www.kernel.org/doc/html/latest/".to_string());
-            resources.push("🐧 Linux Man Pages: https://man7.org/linux/man-pages/".to_string());
-        }
-        
-        if query_lower.contains("docker") {
-            resources.push("🐳 Docker Documentation: https://docs.docker.com/".to_string());
-        }
-        
-        if query_lower.contains("kubernetes") {
-            resources.push("☸️ Kubernetes Documentation: https://kubernetes.io/docs/".to_string());
-        }
-        
-        resources
-    }
-
-    // Check if query is factual (names, dates, biographical info)
-    fn is_factual_query(&self, query: &str) -> bool {
-        let factual_keywords = [
-            "born",
-            "birthday",
-            "birth",
-            "when",
-            "who",
-            "what",
-            "where",
-            "how old",
-            "age",
-            "biography",
-            "life",
-            "career",
-            "education",
-            "family",
-            "died",
-            "death",
-        ];
-
-        let query_lower = query.to_lowercase();
-        factual_keywords
-            .iter()
-            .any(|keyword| query_lower.contains(keyword))
-    }
-
-    // Remove duplicates and rank results by relevance
-    fn deduplicate_and_rank_results(&self, results: Vec<String>) -> Vec<String> {
-        let mut unique_results = Vec::new();
-        let mut seen_urls = std::collections::HashSet::new();
-        let mut seen_titles = std::collections::HashSet::new();
-
-        for result in results {
-            // Extract URL for URL-based deduplication
-            let url = self.extract_url_from_result(&result).unwrap_or_default();
-            
-            // Extract title for title-based deduplication
-            let title = if let Some(colon_pos) = result.find(": ") {
-                result[..colon_pos].to_string()
-            } else {
-                result.clone()
-            };
-
-            // Clean title by removing emoji and extra whitespace
-            let clean_title = title
-                .chars()
-                .filter(|c| c.is_alphanumeric() || c.is_whitespace())
-                .collect::<String>()
-                .trim()
-                .to_lowercase();
-
-            // Check for duplicates by both URL and title
-            let is_duplicate = if !url.is_empty() && seen_urls.contains(&url) {
-                true
-            } else if !clean_title.is_empty() && seen_titles.contains(&clean_title) {
-                true
-            } else {
-                false
-            };
-
-            if !is_duplicate {
-                if !url.is_empty() {
-                    seen_urls.insert(url);
-                }
-                if !clean_title.is_empty() {
-                    seen_titles.insert(clean_title);
-                }
-                unique_results.push(result);
-            }
-        }
-
-        // Prioritize authoritative sources
-        unique_results.sort_by(|a, b| {
-            let a_score = self.get_source_authority_score(a);
-            let b_score = self.get_source_authority_score(b);
-            b_score.cmp(&a_score)
-        });
-
-        unique_results.into_iter().take(8).collect()
-    }
-
-    // Score sources by authority (Wikipedia, gov sites, edu sites, etc.)
-    fn get_source_authority_score(&self, result: &str) -> i32 {
-        let mut score = 0;
-
-        if result.contains("wikipedia.org") {
-            score += 10;
-        }
-        if result.contains(".gov") {
-            score += 8;
-        }
-        if result.contains(".edu") {
-            score += 7;
-        }
-        if result.contains("britannica.com") {
-            score += 6;
-        }
-        if result.contains("imdb.com") {
-            score += 5;
-        }
-        if result.contains("📚") {
-            score += 5; // Wikipedia results
-        }
-
-        score
-    }
-
-    // Extract URL from search result string
-    fn extract_url_from_result(&self, result: &str) -> Option<String> {
-        // Our new format is "📄 Title: URL" or "🔍 Title: URL"
-        if let Some(colon_pos) = result.find(": ") {
-            let url_part = &result[colon_pos + 2..];
-            
-            // Find the end of the URL by looking for whitespace or newline
-            let url_end = url_part
-                .find(|c: char| c.is_whitespace() || c == '\n' || c == '\r')
-                .unwrap_or(url_part.len());
-            
-            let url = url_part[..url_end].trim().to_string();
-            
-            // Validate URL format
-            if url.starts_with("http://") || url.starts_with("https://") {
-                Some(url)
-            } else {
-                None
-            }
-        } else {
-            // Fallback: look for URL patterns anywhere in the string
-            if let Some(url_start) = result.find("http") {
-                let url_slice = &result[url_start..];
-                let url_end = url_slice
-                    .find(|c: char| c.is_whitespace() || c == '\n' || c == '\r')
-                    .unwrap_or(url_slice.len());
-                
-                let url = result[url_start..url_start + url_end].to_string();
-                
-                if url.starts_with("http://") || url.starts_with("https://") {
-                    Some(url)
-                } else {
-                    None
-                }
-            } else {
-                None
+            Err(e) => {
+                let fallback_resources = get_fallback_resources(query);
+                Ok(ToolResult {
+                    success: false,
+                    output: format!(
+                        "Search failed for '{}'.\n\nHere are some relevant resources:\n{}\n\n{} Error details: {}",
+                        query,
+                        fallback_resources.join("\n"),
+                        "⚠️".yellow(),
+                        e
+                    ),
+                    error: Some(e.to_string()),
+                    metadata: Some(serde_json::json!({
+                        "query": query,
+                        "error": e.to_string(),
+                        "fallback_resources_provided": fallback_resources.len()
+                    })),
+                })
             }
         }
     }
 
-    // Extract title from search result string
-    fn extract_title_from_result(&self, result: &str) -> String {
-        // Extract title before the first colon, removing emoji prefix
-        if let Some(colon_pos) = result.find(": ") {
-            let title_part = &result[..colon_pos];
-            // Remove emoji prefix (📄 or 🔍)
-            if let Some(space_pos) = title_part.find(' ') {
-                title_part[space_pos + 1..].trim().to_string()
-            } else {
-                title_part.trim().to_string()
-            }
-        } else {
-            "Unknown Title".to_string()
-        }
-    }
-
-    // Scrape content from a URL using existing web_scrape functionality
-    async fn scrape_url_content(&self, url: &str) -> Result<String, Box<dyn std::error::Error>> {
-        println!("{} Extracting content from: {}", "🔍".cyan(), url);
-
-        // Add basic URL validation
-        if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Err("Invalid URL format".into());
-        }
-
-        let response = self
-            .web_client
-            .get(url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            .timeout(std::time::Duration::from_secs(15)) // Increased timeout
-            .send()
-            .await?;
-
-        let html = response.text().await?;
-        let document = Html::parse_document(&html);
-
-        // Prioritized content selectors - try most specific first
-        let content_selectors = [
-            "article",
-            ".content",
-            "#content", 
-            ".post-content",
-            ".entry-content",
-            "main",
-            ".main-content",
-            ".article-body",
-            ".story-body",
-            ".article-text",
-            ".post-body",
-            "[role='main']",
-            ".markdown-body", // GitHub, documentation sites
-            ".document", // Documentation sites
-        ];
-
-        let mut content = Vec::new();
-        let mut found_content = false;
-
-        // Try content selectors in order of specificity
-        for selector_str in &content_selectors {
-            if let Ok(selector) = Selector::parse(selector_str) {
-                let elements: Vec<_> = document.select(&selector).collect();
-                
-                if !elements.is_empty() {
-                    for element in elements.iter().take(3) { // Limit to first 3 matching containers
-                        let text: String = element.text().collect::<Vec<_>>().join(" ");
-                        let cleaned_text = text
-                            .trim()
-                            .lines()
-                            .map(|line| line.trim())
-                            .filter(|line| !line.is_empty() && line.len() > 10)
-                            .collect::<Vec<_>>()
-                            .join(" ");
-
-                        if !cleaned_text.is_empty() && cleaned_text.len() > 50 {
-                            content.push(cleaned_text);
-                            found_content = true;
-                        }
-                    }
-                    
-                    if found_content && !content.is_empty() {
-                        break; // Found good content, stop trying other selectors
-                    }
-                }
-            }
-        }
-
-        // Fallback: if no structured content found, try paragraph text
-        if !found_content {
-            if let Ok(p_selector) = Selector::parse("p") {
-                for element in document.select(&p_selector).take(10) {
-                    let text: String = element.text().collect::<Vec<_>>().join(" ");
-                    let cleaned_text = text.trim();
-                    
-                    if !cleaned_text.is_empty() && cleaned_text.len() > 30 {
-                        content.push(cleaned_text.to_string());
-                    }
-                }
-            }
-        }
-
-        // Clean up the extracted content
-        let final_content = content.join(" ");
-        let cleaned_content = final_content
-            .chars()
-            .filter(|c| c.is_alphanumeric() || c.is_whitespace() || ".,!?;:()[]{}\"'-".contains(*c))
-            .collect::<String>();
-
-        // Limit content length to avoid overwhelming the model
-        if cleaned_content.len() > 2000 {
-            Ok(format!(
-                "{}...",
-                cleaned_content.chars().take(2000).collect::<String>()
-            ))
-        } else {
-            Ok(cleaned_content)
-        }
-    }
-
-    // Web scraping implementation
+    // Web scraping implementation using the new robust system
     pub async fn web_scrape(&self, url: &str) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        println!("{} Scraping URL: {}", "🌐".cyan(), url.yellow());
-
-        let response = self
-            .web_client
-            .get(url)
-            .header("User-Agent", "Mozilla/5.0 (compatible; Assistant/1.0)")
-            .send()
-            .await?;
-
-        let html = response.text().await?;
-        let document = Html::parse_document(&html);
-
-        let content_selectors = [
-            "article",
-            ".content",
-            "#content",
-            ".post-content",
-            ".entry-content",
-            "main",
-            "p",
-            "h1",
-            "h2",
-            "h3",
-        ];
-        let mut content = Vec::new();
-
-        for selector_str in &content_selectors {
-            if let Ok(selector) = Selector::parse(selector_str) {
-                for element in document.select(&selector).take(10) {
-                    let text: String = element.text().collect::<Vec<_>>().join(" ");
-                    let cleaned_text = text.trim();
-                    if cleaned_text.len() > 50 {
-                        content.push(cleaned_text.to_string());
-                    }
-                }
-                if content.len() > 3 {
-                    break;
-                }
-            }
-        }
-
-        Ok(ToolResult {
-            success: true,
-            output: if content.is_empty() {
-                format!(
-                    "Successfully accessed {} but could not extract readable content",
-                    url
-                )
-            } else {
-                content.join("\n\n")
+        let config = WebSearchConfig::default();
+        let search_engine = WebSearchEngine::new(config);
+        
+        match search_engine.extract_page_content(url).await {
+            Ok(content) => {
+                let content_length = content.len();
+                let word_count = content.split_whitespace().count();
+                
+                Ok(ToolResult {
+                    success: true,
+                    output: format!(
+                        "📄 Content extracted from: {}\n\nContent ({} characters, {} words):\n\n{}",
+                        url, content_length, word_count, content
+                    ),
+                    error: None,
+                    metadata: Some(serde_json::json!({
+                        "url": url,
+                        "content_length": content_length,
+                        "word_count": word_count,
+                        "extraction_successful": true
+                    })),
+                })
             },
-            error: None,
-            metadata: None,
-        })
+            Err(e) => Ok(ToolResult {
+                success: false,
+                output: format!("{} Failed to scrape content from {}\n\nError: {}", "✗".red(), url, e),
+                error: Some(e.to_string()),
+                metadata: Some(serde_json::json!({
+                    "url": url,
+                    "error": e.to_string(),
+                    "extraction_successful": false
+                })),
+            })
+        }
     }
 
     // File operations - Fuzzy search enabled
@@ -1310,7 +645,7 @@ impl ToolExecutor {
     }
 
     fn validate_path(&self, path: &str) -> Result<std::path::PathBuf, String> {
-        use std::path::{Path, PathBuf};
+        use std::path::Path;
 
         // Check for obviously malicious patterns
         if path.contains("..") || path.contains("~") {
@@ -1755,5 +1090,170 @@ edition = "2021"
         } else {
             None
         }
+    }
+
+    // Enhanced web search with specialized engines
+    pub async fn enhanced_web_search(
+        &self,
+        query: &str,
+        include_specialized: bool,
+    ) -> Result<ToolResult, Box<dyn std::error::Error>> {
+        let config = WebSearchConfig::default();
+        let search_engine = WebSearchEngine::new(config);
+        
+        match search_engine.enhanced_search(query, include_specialized).await {
+            Ok(results) => {
+                let search_success = !results.is_empty();
+                let final_output = format_search_results(&results, query);
+                
+                // Enhanced metadata
+                let sources: std::collections::HashSet<_> = results.iter().map(|r| &r.source).collect();
+                let content_count = results.iter().filter(|r| r.content.is_some()).count();
+                let avg_authority = results.iter().map(|r| r.authority_score).sum::<f64>() / results.len() as f64;
+
+                Ok(ToolResult {
+                    success: search_success,
+                    output: final_output,
+                    error: None,
+                    metadata: Some(serde_json::json!({
+                        "query": query,
+                        "total_results": results.len(),
+                        "results_with_content": content_count,
+                        "search_engines_used": sources,
+                        "average_relevance_score": results.iter().map(|r| r.relevance_score).sum::<f64>() / results.len() as f64,
+                        "average_authority_score": avg_authority,
+                        "specialized_search_enabled": include_specialized
+                    })),
+                })
+            }
+            Err(e) => {
+                let fallback_resources = get_fallback_resources(query);
+                Ok(ToolResult {
+                    success: false,
+                    output: format!(
+                        "Enhanced search failed for '{}'.\n\nHere are some relevant resources:\n{}\n\n{} Error details: {}",
+                        query,
+                        fallback_resources.join("\n"),
+                        "⚠️".yellow(),
+                        e
+                    ),
+                    error: Some(e.to_string()),
+                    metadata: Some(serde_json::json!({
+                        "query": query,
+                        "error": e.to_string(),
+                        "fallback_resources_provided": fallback_resources.len()
+                    })),
+                })
+            }
+        }
+    }
+
+    // Web performance testing
+    pub async fn web_performance_test(
+        &self,
+        url: &str,
+        test_count: usize,
+    ) -> Result<ToolResult, Box<dyn std::error::Error>> {
+        println!("{} Running performance test for: {}", "⚡".cyan(), url.yellow());
+
+        let mut results = Vec::new();
+        let start_time = std::time::Instant::now();
+
+        for i in 0..test_count {
+            let request_start = std::time::Instant::now();
+            
+            match self.web_client.get(url).send().await {
+                Ok(response) => {
+                    let response_time = request_start.elapsed();
+                    let status = response.status().as_u16();
+                    let content_length = response.content_length().unwrap_or(0);
+                    
+                    results.push((i + 1, true, status, response_time.as_millis() as u64, content_length));
+                }
+                Err(e) => {
+                    let response_time = request_start.elapsed();
+                    results.push((i + 1, false, 0, response_time.as_millis() as u64, 0));
+                    println!("{} Request {} failed: {}", "❌".red(), i + 1, e);
+                }
+            }
+
+            // Small delay between requests
+            if i < test_count - 1 {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+
+        let total_time = start_time.elapsed();
+        let successful_requests = results.iter().filter(|(_, success, _, _, _)| *success).count();
+        
+        let avg_response_time = if successful_requests > 0 {
+            results.iter()
+                .filter(|(_, success, _, _, _)| *success)
+                .map(|(_, _, _, time, _)| *time)
+                .sum::<u64>() as f64 / successful_requests as f64
+        } else {
+            0.0
+        };
+
+        let min_response_time = results.iter()
+            .filter(|(_, success, _, _, _)| *success)
+            .map(|(_, _, _, time, _)| *time)
+            .min()
+            .unwrap_or(0);
+
+        let max_response_time = results.iter()
+            .filter(|(_, success, _, _, _)| *success)
+            .map(|(_, _, _, time, _)| *time)
+            .max()
+            .unwrap_or(0);
+
+        let output = format!(
+            "⚡ Web Performance Test Results for: {}\n\
+            ═══════════════════════════════════════════════════════\n\
+            📊 Test Summary:\n\
+            • Total Requests: {}\n\
+            • Successful: {} ({:.1}%)\n\
+            • Failed: {} ({:.1}%)\n\
+            • Total Time: {:.2}s\n\
+            • Requests/sec: {:.2}\n\n\
+            ⏱️ Response Time Statistics:\n\
+            • Average: {:.1}ms\n\
+            • Minimum: {}ms\n\
+            • Maximum: {}ms\n\n\
+            📈 Performance Rating: {}",
+            url,
+            test_count,
+            successful_requests,
+            (successful_requests as f64 / test_count as f64) * 100.0,
+            test_count - successful_requests,
+            ((test_count - successful_requests) as f64 / test_count as f64) * 100.0,
+            total_time.as_secs_f64(),
+            test_count as f64 / total_time.as_secs_f64(),
+            avg_response_time,
+            min_response_time,
+            max_response_time,
+            if avg_response_time < 200.0 { "🟢 Excellent" }
+            else if avg_response_time < 500.0 { "🟡 Good" }
+            else if avg_response_time < 1000.0 { "🟠 Fair" }
+            else { "🔴 Poor" }
+        );
+
+        Ok(ToolResult {
+            success: successful_requests > 0,
+            output,
+            error: None,
+            metadata: Some(serde_json::json!({
+                "url": url,
+                "test_count": test_count,
+                "successful_requests": successful_requests,
+                "failed_requests": test_count - successful_requests,
+                "success_rate": (successful_requests as f64 / test_count as f64) * 100.0,
+                "avg_response_time_ms": avg_response_time,
+                "min_response_time_ms": min_response_time,
+                "max_response_time_ms": max_response_time,
+                "total_time_seconds": total_time.as_secs_f64(),
+                "requests_per_second": test_count as f64 / total_time.as_secs_f64()
+            })),
+        })
     }
 }

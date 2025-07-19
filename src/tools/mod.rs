@@ -19,6 +19,9 @@ pub mod model_config;
 pub mod package_management;
 pub mod search;
 pub mod system;
+pub mod web_search;
+pub mod enhanced_web;
+pub mod web_api_testing;
 
 // Re-export everything from core for convenience
 pub use core::*;

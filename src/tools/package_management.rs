@@ -76,6 +76,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Package name required for remove operation".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -108,6 +109,7 @@ impl ToolExecutor {
                 "package": package,
                 "features": features
             })),
+            web_search_result: None,
         })
     }
 
@@ -141,6 +143,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Package name required for uninstall operation".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -185,6 +188,7 @@ impl ToolExecutor {
                 "package": package,
                 "dev": dev
             })),
+            web_search_result: None,
         })
     }
 
@@ -211,6 +215,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Package name or requirements file required for install operation".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -224,6 +229,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Package name required for uninstall operation".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -246,6 +252,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Package name required for show operation".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -269,6 +276,7 @@ impl ToolExecutor {
                 "package": package,
                 "requirements_file": requirements_file
             })),
+            web_search_result: None,
         })
     }
 
@@ -463,6 +471,7 @@ impl ToolExecutor {
                     output: String::new(),
                     error: Some(format!("Unsupported package manager: {}", package_manager.name)),
                     metadata: None,
+            web_search_result: None,
                 });
             }
         }
@@ -485,6 +494,7 @@ impl ToolExecutor {
                 "package": package,
                 "package_manager": package_manager.name
             })),
+            web_search_result: None,
         })
     }
 
@@ -545,6 +555,7 @@ impl ToolExecutor {
                             output: String::new(),
                             error: Some("Enable/disable not supported with service command".to_string()),
                             metadata: None,
+            web_search_result: None,
                         });
                     }
                     ServiceOperation::Disable => {
@@ -553,6 +564,7 @@ impl ToolExecutor {
                             output: String::new(),
                             error: Some("Enable/disable not supported with service command".to_string()),
                             metadata: None,
+            web_search_result: None,
                         });
                     }
                     ServiceOperation::List => {
@@ -592,6 +604,7 @@ impl ToolExecutor {
                     output: String::new(),
                     error: Some(format!("Unsupported service manager: {}", service_manager.name)),
                     metadata: None,
+            web_search_result: None,
                 });
             }
         }
@@ -614,6 +627,7 @@ impl ToolExecutor {
                 "service_name": service_name,
                 "service_manager": service_manager.name
             })),
+            web_search_result: None,
         })
     }
 
@@ -681,6 +695,7 @@ impl ToolExecutor {
                 "family": std::env::consts::FAMILY,
                 "available_tools": dev_tools
             })),
+            web_search_result: None,
         })
     }
 
@@ -752,6 +767,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some("No supported package managers found".to_string()),
                 metadata: None,
+            web_search_result: None,
             })
         } else {
             Ok(ToolResult {
@@ -761,6 +777,7 @@ impl ToolExecutor {
                 metadata: Some(serde_json::json!({
                     "available_managers": available_managers
                 })),
+            web_search_result: None,
             })
         }
     }
@@ -791,6 +808,7 @@ impl ToolExecutor {
                     output: String::new(),
                     error: Some(format!("Search not supported for package manager: {}", package_manager.name)),
                     metadata: None,
+            web_search_result: None,
                 });
             }
         }
@@ -812,6 +830,7 @@ impl ToolExecutor {
                 "query": query,
                 "package_manager": package_manager.name
             })),
+            web_search_result: None,
         })
     }
 }

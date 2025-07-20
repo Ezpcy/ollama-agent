@@ -79,6 +79,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("auto_approve_safe must be a boolean".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -91,6 +92,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("max_file_size must be a number".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -103,6 +105,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("default_timeout must be a number".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -115,6 +118,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("git_default_remote must be a string".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -127,6 +131,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("theme must be a string".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -139,6 +144,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("editor must be a string".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -154,6 +160,7 @@ impl ToolExecutor {
                                 "log_level must be one of: debug, info, warn, error".to_string(),
                             ),
                             metadata: None,
+            web_search_result: None,
                         });
                     }
                 } else {
@@ -162,6 +169,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("log_level must be a string".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -174,6 +182,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("backup_enabled must be a boolean".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -188,6 +197,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("system_prompt must be a string or null".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -200,6 +210,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("enable_command_generation must be a boolean".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -212,6 +223,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("enable_proactive_tool_mode must be a boolean".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -221,6 +233,7 @@ impl ToolExecutor {
                     output: String::new(),
                     error: Some(format!("Unknown configuration key: {}", key)),
                     metadata: None,
+            web_search_result: None,
                 });
             }
         }
@@ -232,6 +245,7 @@ impl ToolExecutor {
             output: format!("Configuration updated: {} = {:?}", key, value),
             error: None,
             metadata: Some(serde_json::to_value(&config)?),
+            web_search_result: None,
         })
     }
 
@@ -263,6 +277,7 @@ impl ToolExecutor {
                     output: String::new(),
                     error: Some(format!("Unknown configuration key: {}", unknown_key)),
                     metadata: None,
+            web_search_result: None,
                 });
             }
             None => {
@@ -305,6 +320,7 @@ impl ToolExecutor {
             output,
             error: None,
             metadata: Some(serde_json::to_value(&config)?),
+            web_search_result: None,
         })
     }
 
@@ -347,6 +363,7 @@ impl ToolExecutor {
                 "path": path,
                 "entries_count": mock_conversation.len()
             })),
+            web_search_result: None,
         })
     }
 
@@ -366,6 +383,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some(format!("File not found: {}", path)),
                 metadata: None,
+            web_search_result: None,
             });
         }
 
@@ -386,6 +404,7 @@ impl ToolExecutor {
                         "path": path,
                         "entries_count": conversation.len()
                     })),
+            web_search_result: None,
                 })
             }
             Err(e) => Ok(ToolResult {
@@ -393,6 +412,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some(format!("Failed to parse conversation file: {}", e)),
                 metadata: None,
+            web_search_result: None,
             }),
         }
     }
@@ -421,6 +441,7 @@ impl ToolExecutor {
             metadata: Some(serde_json::json!({
                 "backup_created": config.backup_enabled
             })),
+            web_search_result: None,
         })
     }
 
@@ -467,6 +488,7 @@ impl ToolExecutor {
                 "task_name": task_name,
                 "schedule": schedule
             })),
+            web_search_result: None,
         })
     }
 
@@ -481,6 +503,7 @@ impl ToolExecutor {
                 output: "No scheduled tasks found".to_string(),
                 error: None,
                 metadata: None,
+            web_search_result: None,
             });
         }
 
@@ -493,6 +516,7 @@ impl ToolExecutor {
                 output: "No scheduled tasks found".to_string(),
                 error: None,
                 metadata: None,
+            web_search_result: None,
             });
         }
 
@@ -538,6 +562,7 @@ impl ToolExecutor {
             metadata: Some(serde_json::json!({
                 "tasks_count": tasks.len()
             })),
+            web_search_result: None,
         })
     }
 
@@ -559,6 +584,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some("No scheduled tasks file found".to_string()),
                 metadata: None,
+            web_search_result: None,
             });
         }
 
@@ -574,6 +600,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some(format!("Task '{}' not found", name)),
                 metadata: None,
+            web_search_result: None,
             });
         }
 
@@ -587,6 +614,7 @@ impl ToolExecutor {
                 "cancelled_task": name,
                 "remaining_tasks": tasks.len()
             })),
+            web_search_result: None,
         })
     }
 

@@ -1,7 +1,7 @@
 use super::core::{ToolExecutor, ToolResult};
 use anyhow::{anyhow, Result};
 use colored::Colorize;
-use reqwest::{Client, Method, Response, StatusCode};
+use reqwest::{Client, Method, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -169,6 +169,7 @@ impl ToolExecutor {
             output: self.format_api_test_result(&test_result),
             error: test_result.error_message.clone(),
             metadata: Some(serde_json::to_value(&test_result)?),
+            web_search_result: None,
         })
     }
 
@@ -696,6 +697,7 @@ impl ToolExecutor {
             output: summary,
             error: None,
             metadata: None,
+            web_search_result: None,
         })
     }
 

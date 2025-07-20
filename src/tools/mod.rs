@@ -21,6 +21,7 @@ pub mod search;
 pub mod system;
 pub mod web_search;
 pub mod enhanced_web;
+pub mod enhanced_websearch;
 pub mod web_api_testing;
 
 // Re-export everything from core for convenience

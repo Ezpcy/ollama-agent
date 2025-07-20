@@ -43,6 +43,7 @@ impl ToolExecutor {
             metadata: Some(serde_json::json!({
                 "resource_type": format!("{:?}", resource_type)
             })),
+            web_search_result: None,
         })
     }
 
@@ -109,6 +110,7 @@ impl ToolExecutor {
                 "volumes": volumes,
                 "environment": environment
             })),
+            web_search_result: None,
         })
     }
 
@@ -137,6 +139,7 @@ impl ToolExecutor {
             metadata: Some(serde_json::json!({
                 "container": container
             })),
+            web_search_result: None,
         })
     }
 
@@ -190,6 +193,7 @@ impl ToolExecutor {
                 "follow": follow,
                 "tail": tail
             })),
+            web_search_result: None,
         })
     }
 }

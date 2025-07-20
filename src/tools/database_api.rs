@@ -2,7 +2,6 @@ use super::core::{
     ApiAuth, DatabaseType, HttpMethod, RestOperation, TextOperation, ToolExecutor, ToolResult,
 };
 use colored::Colorize;
-use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -82,6 +81,7 @@ impl ToolExecutor {
                 "status": status.as_u16(),
                 "headers": headers_map
             })),
+            web_search_result: None,
         })
     }
 
@@ -89,7 +89,7 @@ impl ToolExecutor {
         &self,
         endpoint: &str,
         operation: RestOperation,
-        data: Option<Value>,
+        _data: Option<Value>,
         auth: Option<ApiAuth>,
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
         println!(
@@ -156,6 +156,7 @@ impl ToolExecutor {
                 "endpoint": endpoint,
                 "status": status.as_u16()
             })),
+            web_search_result: None,
         })
     }
 
@@ -211,6 +212,7 @@ impl ToolExecutor {
                 "status": status.as_u16(),
                 "query_length": query.len()
             })),
+            web_search_result: None,
         })
     }
 
@@ -260,6 +262,7 @@ impl ToolExecutor {
                         "connection_string": connection_string,
                         "query": query
                     })),
+                    web_search_result: None,
                 })
             }
         }
@@ -304,6 +307,7 @@ impl ToolExecutor {
                 "query": query,
                 "query_type": self.detect_sql_query_type(query)
             })),
+            web_search_result: None,
         })
     }
 
@@ -345,6 +349,7 @@ impl ToolExecutor {
                         "input_length": input.len(),
                         "output_length": output_length
                     })),
+                    web_search_result: None,
                 })
             }
             Err(e) => Ok(ToolResult {
@@ -352,6 +357,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some(format!("Invalid JSON: {}", e)),
                 metadata: None,
+                    web_search_result: None,
             }),
         }
     }
@@ -383,6 +389,7 @@ impl ToolExecutor {
                             Value::Null => "null",
                         }
                     })),
+                    web_search_result: None,
                 })
             }
             Err(e) => Ok(ToolResult {
@@ -390,6 +397,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some(format!("Invalid JSON: {}", e)),
                 metadata: None,
+                    web_search_result: None,
             }),
         }
     }
@@ -459,6 +467,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some("Empty input".to_string()),
                 metadata: None,
+                    web_search_result: None,
             });
         }
 
@@ -507,6 +516,7 @@ impl ToolExecutor {
                 "columns": header.len(),
                 "delimiter": delimiter
             })),
+            web_search_result: None,
         })
     }
 
@@ -555,6 +565,7 @@ impl ToolExecutor {
                         "matches_count": matches.len(),
                         "flags": flags
                     })),
+                    web_search_result: None,
                 })
             }
             Err(e) => Ok(ToolResult {
@@ -562,6 +573,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some(format!("Invalid regex pattern: {}", e)),
                 metadata: None,
+                    web_search_result: None,
             }),
         }
     }
@@ -599,6 +611,7 @@ impl ToolExecutor {
                                     .to_string(),
                             ),
                             metadata: None,
+                    web_search_result: None,
                         });
                     }
                 }
@@ -615,6 +628,7 @@ impl ToolExecutor {
                 "input_length": input.len(),
                 "output_length": output_length
             })),
+            web_search_result: None,
         })
     }
 }

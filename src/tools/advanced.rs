@@ -3,7 +3,6 @@ use super::core::{
     ToolExecutor, ToolResult,
 };
 use colored::Colorize;
-use std::collections::HashMap;
 use std::process::Command;
 use std::time::Instant;
 
@@ -45,6 +44,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some(e.to_string()),
                         metadata: None,
+                web_search_result: None,
                     });
                 }
             }
@@ -68,6 +68,7 @@ impl ToolExecutor {
                 "total_tools": results.len(),
                 "successful_tools": results.iter().filter(|r| r.success).count()
             })),
+            web_search_result: None,
         })
     }
 
@@ -93,6 +94,7 @@ impl ToolExecutor {
                 "goal": current_goal,
                 "type": "smart_suggestions"
             })),
+            web_search_result: None,
         })
     }
 
@@ -182,6 +184,7 @@ impl ToolExecutor {
                         "start_time": start_time.elapsed().as_millis(),
                         "pid": std::process::id()
                     })),
+                    web_search_result: None,
                 })
             }
             MonitorOperation::Stop => {
@@ -192,6 +195,7 @@ impl ToolExecutor {
                     metadata: Some(serde_json::json!({
                         "operation": "stop"
                     })),
+                    web_search_result: None,
                 })
             }
             MonitorOperation::Status => {
@@ -203,6 +207,7 @@ impl ToolExecutor {
                     metadata: Some(serde_json::json!({
                         "operation": "status"
                     })),
+                    web_search_result: None,
                 })
             }
             MonitorOperation::Report => {
@@ -214,6 +219,7 @@ impl ToolExecutor {
                     metadata: Some(serde_json::json!({
                         "operation": "report"
                     })),
+                    web_search_result: None,
                 })
             }
         }
@@ -372,6 +378,7 @@ impl ToolExecutor {
                 "analysis_type": format!("{:?}", analysis_type),
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
+            web_search_result: None,
         })
     }
 
@@ -767,6 +774,7 @@ impl ToolExecutor {
                 "scan_depth": format!("{:?}", scan_depth),
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
+            web_search_result: None,
         })
     }
 
@@ -1007,6 +1015,7 @@ impl ToolExecutor {
                 "scan_type": format!("{:?}", scan_type),
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
+            web_search_result: None,
         })
     }
 

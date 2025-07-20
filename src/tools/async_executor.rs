@@ -172,7 +172,7 @@ impl AsyncToolExecutor {
             AvailableTool::ExecuteCommand { command, .. } => format!("execute:{}", command),
             AvailableTool::GenerateCommand { user_request, .. } => format!("generate_command:{}", user_request),
             AvailableTool::GitStatus { .. } => "git_status".to_string(),
-            AvailableTool::WebSearch { query } => format!("web_search:{}", query),
+            AvailableTool::WebSearch { query, .. } => format!("web_search:{}", query),
             AvailableTool::WebScrape { url } => format!("web_scrape:{}", url),
             _ => "unknown_tool".to_string(),
         }

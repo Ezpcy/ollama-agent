@@ -59,6 +59,7 @@ impl ToolExecutor {
                             output: String::new(),
                             error: Some("Temperature must be between 0.0 and 2.0".to_string()),
                             metadata: None,
+            web_search_result: None,
                         });
                     }
                 } else {
@@ -67,6 +68,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Temperature must be a number".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -81,6 +83,7 @@ impl ToolExecutor {
                             output: String::new(),
                             error: Some("Max tokens must be between 1 and 32768".to_string()),
                             metadata: None,
+            web_search_result: None,
                         });
                     }
                 } else {
@@ -89,6 +92,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Max tokens must be a number".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -103,6 +107,7 @@ impl ToolExecutor {
                             output: String::new(),
                             error: Some("Top-p must be between 0.0 and 1.0".to_string()),
                             metadata: None,
+            web_search_result: None,
                         });
                     }
                 } else {
@@ -111,6 +116,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Top-p must be a number".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -125,6 +131,7 @@ impl ToolExecutor {
                             output: String::new(),
                             error: Some("Top-k must be between 1 and 100".to_string()),
                             metadata: None,
+            web_search_result: None,
                         });
                     }
                 } else {
@@ -133,6 +140,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Top-k must be a number".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -147,6 +155,7 @@ impl ToolExecutor {
                             output: String::new(),
                             error: Some("Repeat penalty must be between 0.5 and 2.0".to_string()),
                             metadata: None,
+            web_search_result: None,
                         });
                     }
                 } else {
@@ -155,6 +164,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Repeat penalty must be a number".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -168,6 +178,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("System prompt must be a string".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -182,6 +193,7 @@ impl ToolExecutor {
                             output: String::new(),
                             error: Some("Context length must be between 512 and 32768".to_string()),
                             metadata: None,
+            web_search_result: None,
                         });
                     }
                 } else {
@@ -190,6 +202,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some("Context length must be a number".to_string()),
                         metadata: None,
+            web_search_result: None,
                     });
                 }
             }
@@ -200,6 +213,7 @@ impl ToolExecutor {
             output: result,
             error: None,
             metadata: Some(serde_json::to_value(&*config)?),
+            web_search_result: None,
         })
     }
 
@@ -259,6 +273,7 @@ impl ToolExecutor {
             output,
             error: None,
             metadata: Some(serde_json::to_value(&*config)?),
+            web_search_result: None,
         })
     }
 
@@ -290,6 +305,7 @@ impl ToolExecutor {
                         .join(", ")
                 )),
                 metadata: None,
+            web_search_result: None,
             });
         }
 
@@ -304,6 +320,7 @@ impl ToolExecutor {
             output: format!("Model switched from '{}' to '{}'", old_model, model_name),
             error: None,
             metadata: Some(serde_json::to_value(&*config)?),
+            web_search_result: None,
         })
     }
 }

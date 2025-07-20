@@ -17,7 +17,6 @@ use tools::{ToolConfig, ToolExecutor};
 use workspace::WorkspaceManager;
 
 mod api_models {
-    pub use crate::client::SelectedModel;
 }
 
 #[derive(Parser)]

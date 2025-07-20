@@ -20,6 +20,7 @@ pub struct ToolResult {
     pub output: String,
     pub error: Option<String>,
     pub metadata: Option<serde_json::Value>,
+    pub web_search_result: Option<WebSearchResult>,
 }
 
 // Available tools enum - significantly extended
@@ -28,6 +29,10 @@ pub enum AvailableTool {
     // File Operations
     WebSearch {
         query: String,
+        max_uses: Option<usize>,
+        allowed_domains: Option<Vec<String>>,
+        blocked_domains: Option<Vec<String>>,
+        user_location: Option<UserLocation>,
     },
     WebScrape {
         url: String,
@@ -470,6 +475,68 @@ pub enum SecurityScanDepth {
     Compliance,
 }
 
+/// User location for web search context
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserLocation {
+    pub country: Option<String>,  // ISO 2-letter country code
+    pub city: Option<String>,     // Free text city name
+    pub region: Option<String>,   // Free text region/state
+    pub timezone: Option<String>, // IANA timezone format
+}
+
+/// Web search configuration for advanced control
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchConfig {
+    pub max_uses: usize,
+    pub allowed_domains: Vec<String>,
+    pub blocked_domains: Vec<String>,
+    pub user_location: Option<UserLocation>,
+    pub include_citations: bool,
+    pub search_context_size: SearchContextSize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SearchContextSize {
+    Low,
+    Medium,
+    High,
+}
+
+/// Web search result with citations and metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchResult {
+    pub query_used: String,
+    pub results: Vec<SearchResultItem>,
+    pub citations: Vec<Citation>,
+    pub search_metadata: SearchMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResultItem {
+    pub title: String,
+    pub url: String,
+    pub snippet: Option<String>,
+    pub content: Option<String>,
+    pub relevance_score: f64,
+    pub source_domain: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Citation {
+    pub url: String,
+    pub title: String,
+    pub domain: String,
+    pub excerpt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchMetadata {
+    pub total_searches_performed: usize,
+    pub search_queries_used: Vec<String>,
+    pub timestamp: std::time::SystemTime,
+    pub processing_time_ms: u64,
+}
+
 // Tool executor
 pub struct ToolExecutor {
     pub web_client: reqwest::Client,
@@ -500,6 +567,25 @@ impl Default for ToolConfig {
     }
 }
 
+impl Default for WebSearchConfig {
+    fn default() -> Self {
+        Self {
+            max_uses: 5,
+            allowed_domains: Vec::new(),
+            blocked_domains: Vec::new(),
+            user_location: None,
+            include_citations: true,
+            search_context_size: SearchContextSize::Medium,
+        }
+    }
+}
+
+impl Default for SearchContextSize {
+    fn default() -> Self {
+        SearchContextSize::Medium
+    }
+}
+
 impl ToolExecutor {
     pub fn new() -> Self {
         Self {
@@ -523,7 +609,7 @@ impl ToolExecutor {
     ) -> Result<ToolResult, Box<dyn std::error::Error>> {
         match tool {
             // Existing tools
-            AvailableTool::WebSearch { query } => self.web_search(&query).await,
+            AvailableTool::WebSearch { query, .. } => self.web_search(&query).await,
             AvailableTool::WebScrape { url } => self.web_scrape(&url).await,
             AvailableTool::FileSearch { pattern, directory } => {
                 self.file_search(&pattern, directory.as_deref())
@@ -800,6 +886,7 @@ impl ToolExecutor {
                     "current_depth": current_depth,
                     "tools_count": tools.len()
                 })),
+                web_search_result: None,
             });
         }
         
@@ -824,6 +911,7 @@ impl ToolExecutor {
                 metadata: Some(serde_json::json!({
                     "tools_executed": 0
                 })),
+                web_search_result: None,
             });
         }
         
@@ -971,6 +1059,7 @@ impl ToolExecutor {
                 "max_parallel_limit": MAX_PARALLEL_TOOLS,
                 "tools_limited": tools.len() > MAX_PARALLEL_TOOLS
             })),
+            web_search_result: None,
         })
     }
 }

@@ -84,7 +84,7 @@ impl PermissionManager {
 
     fn describe_action(&self, tool: &AvailableTool) -> (String, RiskLevel) {
         match tool {
-            AvailableTool::WebSearch { query } => {
+            AvailableTool::WebSearch { query, .. } => {
                 (format!("Search web for: '{}'", query), RiskLevel::Safe)
             }
             AvailableTool::WebScrape { url } => {
@@ -154,7 +154,7 @@ impl PermissionManager {
         println!("{}", "📋 Action Details:".cyan().bold());
 
         match tool {
-            AvailableTool::WebSearch { query } => {
+            AvailableTool::WebSearch { query, .. } => {
                 println!("  {} {}", "Type:".blue(), "Web Search");
                 println!("  {} {}", "Query:".blue(), query.yellow());
                 println!("  {} Search engines for information", "Effect:".blue());

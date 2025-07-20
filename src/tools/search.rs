@@ -545,6 +545,7 @@ pub async fn enhanced_file_search(
             output: format!("No files found matching pattern: {}", query.pattern),
             error: None,
             metadata: None,
+            web_search_result: None,
         });
     }
 
@@ -577,5 +578,6 @@ pub async fn enhanced_file_search(
         output: output.join("\n"),
         error: None,
         metadata: Some(serde_json::to_value(&results)?),
+        web_search_result: None,
     })
 }

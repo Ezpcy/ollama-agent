@@ -54,6 +54,7 @@ impl ToolExecutor {
                 "arch": arch,
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
+            web_search_result: None,
         })
     }
 
@@ -280,6 +281,7 @@ impl ToolExecutor {
                 "type": "memory_usage",
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
+            web_search_result: None,
         })
     }
 
@@ -308,6 +310,7 @@ impl ToolExecutor {
                         "path": check_path,
                         "type": "disk_usage"
                     })),
+            web_search_result: None,
                 });
             }
         }
@@ -326,6 +329,7 @@ impl ToolExecutor {
                         "path": check_path,
                         "type": "disk_usage"
                     })),
+            web_search_result: None,
                 });
             }
         }
@@ -335,6 +339,7 @@ impl ToolExecutor {
             output: String::new(),
             error: Some("Unable to check disk usage on this system".to_string()),
             metadata: None,
+            web_search_result: None,
         })
     }
 
@@ -370,6 +375,7 @@ impl ToolExecutor {
                         "filter": filter,
                         "type": "process_list"
                     })),
+            web_search_result: None,
                 });
             }
         }
@@ -397,6 +403,7 @@ impl ToolExecutor {
                         "filter": filter,
                         "type": "process_list"
                     })),
+            web_search_result: None,
                 });
             }
         }
@@ -406,6 +413,7 @@ impl ToolExecutor {
             output: String::new(),
             error: Some("Unable to list processes on this system".to_string()),
             metadata: None,
+            web_search_result: None,
         })
     }
 
@@ -460,6 +468,7 @@ impl ToolExecutor {
                 "type": "network_info",
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
+            web_search_result: None,
         })
     }
 
@@ -487,6 +496,7 @@ impl ToolExecutor {
                     output: String::new(),
                     error: Some(format!("File not found: {}", path)),
                     metadata: None,
+            web_search_result: None,
                 });
             }
         };
@@ -530,6 +540,7 @@ impl ToolExecutor {
                 "duration_seconds": duration,
                 "changes_count": changes.len()
             })),
+            web_search_result: None,
         })
     }
 }

@@ -34,6 +34,7 @@ impl ToolExecutor {
                 "repository_path": repository_path,
                 "command": "status"
             })),
+            web_search_result: None,
         })
     }
 
@@ -71,6 +72,7 @@ impl ToolExecutor {
                 "files": files,
                 "command": "add"
             })),
+            web_search_result: None,
         })
     }
 
@@ -107,6 +109,7 @@ impl ToolExecutor {
                 "message": message,
                 "command": "commit"
             })),
+            web_search_result: None,
         })
     }
 
@@ -150,6 +153,7 @@ impl ToolExecutor {
                 "branch": branch,
                 "command": "push"
             })),
+            web_search_result: None,
         })
     }
 
@@ -193,6 +197,7 @@ impl ToolExecutor {
                 "branch": branch,
                 "command": "pull"
             })),
+            web_search_result: None,
         })
     }
 
@@ -245,6 +250,7 @@ impl ToolExecutor {
                 "operation": format!("{:?}", operation),
                 "command": "branch"
             })),
+            web_search_result: None,
         })
     }
 
@@ -291,6 +297,7 @@ impl ToolExecutor {
                 "oneline": oneline,
                 "command": "log"
             })),
+            web_search_result: None,
         })
     }
 
@@ -337,6 +344,7 @@ impl ToolExecutor {
                 "cached": cached,
                 "command": "diff"
             })),
+            web_search_result: None,
         })
     }
 }

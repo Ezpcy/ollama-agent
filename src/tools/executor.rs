@@ -1,30 +1,34 @@
 use colored::Colorize;
 use regex::Regex;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command;
 use walkdir::WalkDir;
 
 use super::core::{EditOperation, ToolExecutor, ToolResult};
 use super::search::{enhanced_file_search, ErrorStrategy, SearchQuery, ToolChain};
-use super::web_search::{WebSearchEngine, WebSearchConfig, format_search_results, get_fallback_resources};
-use super::enhanced_web::{WebScrapingConfig, EnhancedWebContent};
-use super::web_api_testing::{ApiTestConfig, ApiValidation};
+use super::web_search::{WebSearchEngine, format_search_results, get_fallback_resources};
+use super::core::WebSearchConfig;
+use super::enhanced_websearch::{EnhancedWebSearchEngine, EnhancedWebSearchConfig, format_enhanced_search_results};
 
 impl ToolExecutor {
-    // Enhanced web search implementation using the new robust system
+    // Enhanced web search implementation using the new intelligent system
     pub async fn web_search(&self, query: &str) -> Result<ToolResult, Box<dyn std::error::Error>> {
-        let config = WebSearchConfig::default();
-        let search_engine = WebSearchEngine::new(config);
+        let config = EnhancedWebSearchConfig::default();
+        let search_engine = EnhancedWebSearchEngine::new(config);
         
-        match search_engine.search(query).await {
+        match search_engine.intelligent_search(query).await {
             Ok(results) => {
                 let search_success = !results.is_empty();
-                let final_output = format_search_results(&results, query);
+                let final_output = format_enhanced_search_results(&results, query);
                 
                 // Count results with content
                 let content_count = results.iter().filter(|r| r.content.is_some()).count();
+                let avg_relevance = if !results.is_empty() {
+                    results.iter().map(|r| r.relevance_score).sum::<f64>() / results.len() as f64
+                } else {
+                    0.0
+                };
 
                 Ok(ToolResult {
                     success: search_success,
@@ -32,11 +36,15 @@ impl ToolExecutor {
                     error: None,
                     metadata: Some(serde_json::json!({
                         "query": query,
+                        "query_intent": format!("{:?}", results.first().map(|r| &r.query_intent).unwrap_or(&super::enhanced_websearch::QueryIntent::General)),
                         "total_results": results.len(),
                         "results_with_content": content_count,
-                        "search_engines_used": ["Wikipedia", "DuckDuckGo", "Bing"],
-                        "average_relevance_score": results.iter().map(|r| r.relevance_score).sum::<f64>() / results.len() as f64
+                        "search_engines_used": results.iter().map(|r| &r.source).collect::<std::collections::HashSet<_>>().into_iter().collect::<Vec<_>>(),
+                        "average_relevance_score": avg_relevance,
+                        "average_authority_score": if !results.is_empty() { results.iter().map(|r| r.authority_score).sum::<f64>() / results.len() as f64 } else { 0.0 },
+                        "average_quality_score": if !results.is_empty() { results.iter().map(|r| r.quality_score).sum::<f64>() / results.len() as f64 } else { 0.0 }
                     })),
+                    web_search_result: None,
                 })
             }
             Err(e) => {
@@ -44,9 +52,9 @@ impl ToolExecutor {
                 Ok(ToolResult {
                     success: false,
                     output: format!(
-                        "Search failed for '{}'.\n\nHere are some relevant resources:\n{}\n\n{} Error details: {}",
+                        "Enhanced search failed for '{}'.\n\nHere are some relevant resources:\n{}\n\n{} Error details: {}",
                         query,
-                        fallback_resources.join("\n"),
+                        fallback_resources.iter().map(|item| format!("• {} - {}", item.title, item.url)).collect::<Vec<_>>().join("\n"),
                         "⚠️".yellow(),
                         e
                     ),
@@ -54,8 +62,10 @@ impl ToolExecutor {
                     metadata: Some(serde_json::json!({
                         "query": query,
                         "error": e.to_string(),
-                        "fallback_resources_provided": fallback_resources.len()
+                        "fallback_resources_provided": fallback_resources.len(),
+                        "search_type": "enhanced_intelligent"
                     })),
+                    web_search_result: None,
                 })
             }
         }
@@ -84,6 +94,7 @@ impl ToolExecutor {
                         "word_count": word_count,
                         "extraction_successful": true
                     })),
+                    web_search_result: None,
                 })
             },
             Err(e) => Ok(ToolResult {
@@ -95,6 +106,7 @@ impl ToolExecutor {
                     "error": e.to_string(),
                     "extraction_successful": false
                 })),
+                web_search_result: None,
             })
         }
     }
@@ -173,6 +185,7 @@ impl ToolExecutor {
             },
             error: None,
             metadata: None,
+            web_search_result: None,
         })
     }
 
@@ -230,6 +243,7 @@ impl ToolExecutor {
                                 output: String::new(),
                                 error: Some(e.to_string()),
                                 metadata: None,
+                                web_search_result: None,
                             });
                             break;
                         }
@@ -326,6 +340,7 @@ impl ToolExecutor {
                     output: String::new(),
                     error: Some(error),
                     metadata: None,
+                    web_search_result: None,
                 });
             }
         };
@@ -336,12 +351,14 @@ impl ToolExecutor {
                 output: content,
                 error: None,
                 metadata: None,
+                web_search_result: None,
             }),
             Err(e) => Ok(ToolResult {
                 success: false,
                 output: String::new(),
                 error: Some(e.to_string()),
                 metadata: None,
+                web_search_result: None,
             }),
         }
     }
@@ -362,6 +379,7 @@ impl ToolExecutor {
                     output: String::new(),
                     error: Some(error),
                     metadata: None,
+                    web_search_result: None,
                 });
             }
         };
@@ -376,12 +394,14 @@ impl ToolExecutor {
                 output: format!("Successfully wrote {} bytes to {}", content.len(), path),
                 error: None,
                 metadata: None,
+                web_search_result: None,
             }),
             Err(e) => Ok(ToolResult {
                 success: false,
                 output: String::new(),
                 error: Some(e.to_string()),
                 metadata: None,
+                web_search_result: None,
             }),
         }
     }
@@ -401,6 +421,7 @@ impl ToolExecutor {
                     output: String::new(),
                     error: Some(format!("Could not read file {}: {}", path, e)),
                     metadata: None,
+                    web_search_result: None,
                 });
             }
         };
@@ -415,6 +436,7 @@ impl ToolExecutor {
                         output: String::new(),
                         error: Some(format!("Text '{}' not found in file", old)),
                         metadata: None,
+                        web_search_result: None,
                     });
                 }
             }
@@ -433,6 +455,7 @@ impl ToolExecutor {
                             lines.len()
                         )),
                         metadata: None,
+                        web_search_result: None,
                     });
                 }
             }
@@ -471,6 +494,7 @@ impl ToolExecutor {
                             lines.len()
                         )),
                         metadata: None,
+                        web_search_result: None,
                     });
                 }
             }
@@ -501,6 +525,7 @@ impl ToolExecutor {
                     output: format!("{} in {}", operation_desc, path),
                     error: None,
                     metadata: None,
+                    web_search_result: None,
                 })
             }
             Err(e) => Ok(ToolResult {
@@ -508,6 +533,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some(format!("Could not write to file {}: {}", path, e)),
                 metadata: None,
+                web_search_result: None,
             }),
         }
     }
@@ -555,6 +581,7 @@ impl ToolExecutor {
             },
             error: None,
             metadata: None,
+            web_search_result: None,
         })
     }
 
@@ -721,6 +748,7 @@ impl ToolExecutor {
                 output: String::new(),
                 error: Some(validation_error),
                 metadata: None,
+                web_search_result: None,
             });
         }
 
@@ -796,6 +824,7 @@ impl ToolExecutor {
             output: output_msg,
             error: None,
             metadata: None,
+            web_search_result: None,
         })
     }
 
@@ -870,6 +899,7 @@ impl ToolExecutor {
                 "os": os,
                 "shell": shell
             })),
+            web_search_result: None,
         })
     }
 
@@ -902,6 +932,7 @@ impl ToolExecutor {
             output: items.join("\n"),
             error: None,
             metadata: None,
+            web_search_result: None,
         })
     }
 
@@ -938,6 +969,7 @@ impl ToolExecutor {
             ),
             error: None,
             metadata: None,
+            web_search_result: None,
         })
     }
 
@@ -1102,28 +1134,33 @@ edition = "2021"
         let search_engine = WebSearchEngine::new(config);
         
         match search_engine.enhanced_search(query, include_specialized).await {
-            Ok(results) => {
-                let search_success = !results.is_empty();
-                let final_output = format_search_results(&results, query);
+            Ok(search_result) => {
+                let search_success = !search_result.results.is_empty();
+                let final_output = format_search_results(&search_result);
                 
                 // Enhanced metadata
-                let sources: std::collections::HashSet<_> = results.iter().map(|r| &r.source).collect();
-                let content_count = results.iter().filter(|r| r.content.is_some()).count();
-                let avg_authority = results.iter().map(|r| r.authority_score).sum::<f64>() / results.len() as f64;
+                let content_count = search_result.results.iter().filter(|r| r.content.is_some()).count();
+                let avg_relevance = if !search_result.results.is_empty() {
+                    search_result.results.iter().map(|r| r.relevance_score).sum::<f64>() / search_result.results.len() as f64
+                } else {
+                    0.0
+                };
 
                 Ok(ToolResult {
                     success: search_success,
                     output: final_output,
                     error: None,
                     metadata: Some(serde_json::json!({
-                        "query": query,
-                        "total_results": results.len(),
+                        "query": search_result.query_used,
+                        "total_results": search_result.results.len(),
                         "results_with_content": content_count,
-                        "search_engines_used": sources,
-                        "average_relevance_score": results.iter().map(|r| r.relevance_score).sum::<f64>() / results.len() as f64,
-                        "average_authority_score": avg_authority,
+                        "citations": search_result.citations.len(),
+                        "searches_performed": search_result.search_metadata.total_searches_performed,
+                        "processing_time_ms": search_result.search_metadata.processing_time_ms,
+                        "average_relevance_score": avg_relevance,
                         "specialized_search_enabled": include_specialized
                     })),
+                    web_search_result: Some(search_result),
                 })
             }
             Err(e) => {
@@ -1133,7 +1170,7 @@ edition = "2021"
                     output: format!(
                         "Enhanced search failed for '{}'.\n\nHere are some relevant resources:\n{}\n\n{} Error details: {}",
                         query,
-                        fallback_resources.join("\n"),
+                        fallback_resources.iter().map(|item| format!("• {} - {}", item.title, item.url)).collect::<Vec<_>>().join("\n"),
                         "⚠️".yellow(),
                         e
                     ),
@@ -1143,6 +1180,7 @@ edition = "2021"
                         "error": e.to_string(),
                         "fallback_resources_provided": fallback_resources.len()
                     })),
+                    web_search_result: None,
                 })
             }
         }
@@ -1254,6 +1292,7 @@ edition = "2021"
                 "total_time_seconds": total_time.as_secs_f64(),
                 "requests_per_second": test_count as f64 / total_time.as_secs_f64()
             })),
+            web_search_result: None,
         })
     }
 }

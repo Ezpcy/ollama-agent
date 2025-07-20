@@ -1,7 +1,7 @@
 use super::core::{ToolExecutor, ToolResult};
 use anyhow::{anyhow, Result};
 use colored::Colorize;
-use reqwest::{Client, Method, Response};
+use reqwest::{Client, Response};
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -184,6 +184,7 @@ impl ToolExecutor {
             output: self.format_enhanced_content(&enhanced_content),
             error: None,
             metadata: Some(serde_json::to_value(&enhanced_content)?),
+            web_search_result: None,
         })
     }
 
@@ -602,7 +603,7 @@ impl ToolExecutor {
         let config = config.unwrap_or_default();
         println!("{} Batch web scraping {} URLs", "🌐".cyan(), urls.len());
 
-        let mut all_results = Vec::new();
+        let all_results = Vec::new();
         let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(config.max_concurrent_requests));
 
         let mut tasks = Vec::new();
@@ -650,6 +651,7 @@ impl ToolExecutor {
             output: summary,
             error: None,
             metadata: Some(serde_json::to_value(&all_results)?),
+            web_search_result: None,
         })
     }
 

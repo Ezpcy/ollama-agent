@@ -368,6 +368,10 @@ Analyze the request and respond with JSON only:"#,
                     if let Some(query) = tool_req.parameters.get("query").and_then(|v| v.as_str()) {
                         tools.push(AvailableTool::WebSearch {
                             query: query.to_string(),
+                            max_uses: None,
+                            allowed_domains: None,
+                            blocked_domains: None,
+                            user_location: None,
                         });
                     }
                 }
